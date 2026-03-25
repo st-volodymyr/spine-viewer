@@ -1,0 +1,210 @@
+/* Buttons */
+.sv-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+    background: var(--sv-bg-input);
+    color: var(--sv-text-primary);
+    font-family: var(--sv-font-family);
+    font-size: var(--sv-font-size);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+
+.sv-btn:hover {
+    background: var(--sv-bg-hover);
+    border-color: var(--sv-accent);
+}
+
+.sv-btn-primary {
+    background: var(--sv-accent);
+    color: white;
+    border-color: var(--sv-accent);
+}
+
+.sv-btn-primary:hover {
+    background: var(--sv-accent-hover);
+}
+
+.sv-btn-sm {
+    padding: 2px 8px;
+    font-size: var(--sv-font-size-sm);
+}
+
+.sv-btn-icon {
+    padding: 4px 6px;
+    min-width: 28px;
+    justify-content: center;
+}
+
+/* Select */
+.sv-select {
+    padding: 3px 8px;
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+    background: var(--sv-bg-input);
+    color: var(--sv-text-primary);
+    font-family: var(--sv-font-family);
+    font-size: var(--sv-font-size);
+    cursor: pointer;
+    min-width: 0;
+}
+
+.sv-select:focus {
+    outline: none;
+    border-color: var(--sv-accent);
+}
+
+/* Slider */
+.sv-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--sv-border);
+    outline: none;
+    cursor: pointer;
+}
+
+.sv-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--sv-accent);
+    cursor: pointer;
+}
+
+/* Toggle */
+.sv-toggle {
+    position: relative;
+    display: inline-block;
+    width: 32px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.sv-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.sv-toggle-track {
+    position: absolute;
+    inset: 0;
+    background: var(--sv-border);
+    border-radius: 9px;
+    transition: background 0.2s;
+}
+
+.sv-toggle input:checked + .sv-toggle-track {
+    background: var(--sv-accent);
+}
+
+.sv-toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: white;
+    transition: transform 0.2s;
+}
+
+.sv-toggle input:checked + .sv-toggle-track::after {
+    transform: translateX(14px);
+}
+
+/* Labeled controls */
+.sv-control-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.sv-control-label {
+    font-size: var(--sv-font-size-sm);
+    color: var(--sv-text-secondary);
+    min-width: 50px;
+    flex-shrink: 0;
+}
+
+.sv-control-value {
+    font-size: var(--sv-font-size-sm);
+    color: var(--sv-text-primary);
+    font-family: var(--sv-font-mono);
+    min-width: 35px;
+    text-align: right;
+}
+
+/* Number input */
+.sv-number-input {
+    width: 60px;
+    padding: 2px 6px;
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+    background: var(--sv-bg-input);
+    color: var(--sv-text-primary);
+    font-family: var(--sv-font-mono);
+    font-size: var(--sv-font-size-sm);
+    text-align: center;
+}
+
+.sv-number-input:focus {
+    outline: none;
+    border-color: var(--sv-accent);
+}
+
+/* Color picker */
+.sv-color-input {
+    width: 28px;
+    height: 22px;
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+    cursor: pointer;
+    padding: 0;
+    background: none;
+}
+
+/* Tabs */
+.sv-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--sv-border);
+    background: var(--sv-bg-secondary);
+    flex-shrink: 0;
+}
+
+.sv-tab {
+    padding: 6px 12px;
+    font-size: var(--sv-font-size-sm);
+    color: var(--sv-text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    user-select: none;
+}
+
+.sv-tab:hover {
+    color: var(--sv-text-primary);
+}
+
+.sv-tab.active {
+    color: var(--sv-accent);
+    border-bottom-color: var(--sv-accent);
+}
+
+.sv-tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}

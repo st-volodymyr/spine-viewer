@@ -1,0 +1,114 @@
+/* Tree view */
+.sv-tree {
+    font-size: var(--sv-font-size-sm);
+}
+
+.sv-tree-search {
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+    background: var(--sv-bg-input);
+    color: var(--sv-text-primary);
+    font-size: var(--sv-font-size-sm);
+    font-family: var(--sv-font-family);
+    margin-bottom: 4px;
+}
+
+.sv-tree-search:focus {
+    outline: none;
+    border-color: var(--sv-accent);
+}
+
+.sv-tree-node {
+    user-select: none;
+}
+
+.sv-tree-node-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px;
+    cursor: pointer;
+    border-radius: var(--sv-radius);
+    transition: background 0.1s;
+}
+
+.sv-tree-node-row:hover {
+    background: var(--sv-bg-hover);
+}
+
+.sv-tree-node-row.selected {
+    background: var(--sv-accent-light);
+    color: var(--sv-accent);
+}
+
+.sv-tree-toggle {
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    color: var(--sv-text-muted);
+    flex-shrink: 0;
+}
+
+.sv-tree-toggle.has-children {
+    cursor: pointer;
+}
+
+.sv-tree-icon {
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.sv-tree-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sv-tree-children {
+    padding-left: 16px;
+}
+
+.sv-tree-badge {
+    font-size: 9px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--sv-bg-secondary);
+    color: var(--sv-text-muted);
+    flex-shrink: 0;
+}
+
+/* Inspector detail panel */
+.sv-detail-panel {
+    padding: 8px;
+    font-size: var(--sv-font-size-sm);
+}
+
+.sv-detail-row {
+    display: flex;
+    gap: 8px;
+    padding: 2px 0;
+    border-bottom: 1px solid var(--sv-border-light);
+}
+
+.sv-detail-key {
+    color: var(--sv-text-secondary);
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.sv-detail-value {
+    color: var(--sv-text-primary);
+    font-family: var(--sv-font-mono);
+    word-break: break-all;
+}

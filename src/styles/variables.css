@@ -1,0 +1,39 @@
+:root {
+    /* Neutral medium theme — easy on the eyes */
+    --sv-bg-primary: #e0e0e0;
+    --sv-bg-secondary: #d4d4d4;
+    --sv-bg-surface: #eaeaea;
+    --sv-bg-viewport: #b8b8b8;
+    --sv-bg-input: #f2f2f2;
+    --sv-bg-hover: #c8c8c8;
+    --sv-bg-active: #bcc8d6;
+
+    --sv-border: #b0b0b0;
+    --sv-border-light: #c0c0c0;
+
+    --sv-text-primary: #2d2d2d;
+    --sv-text-secondary: #5a5a5a;
+    --sv-text-muted: #808080;
+
+    --sv-accent: #4a7fb5;
+    --sv-accent-hover: #3a6a9a;
+    --sv-accent-light: #d0dff0;
+
+    --sv-success: #4a9a5a;
+    --sv-warning: #c08a30;
+    --sv-error: #c05050;
+
+    --sv-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --sv-font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    --sv-font-size: 13px;
+    --sv-font-size-sm: 11px;
+
+    --sv-radius: 4px;
+    --sv-radius-lg: 6px;
+    --sv-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    --sv-shadow-lg: 0 2px 8px rgba(0,0,0,0.15);
+
+    --sv-toolbar-height: 40px;
+    --sv-bottombar-height: 28px;
+    --sv-panel-width: 280px;
+}
