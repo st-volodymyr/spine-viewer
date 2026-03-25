@@ -125,7 +125,7 @@ export class PlaceholderPanel {
         // Label
         // Position will be updated in spine's coordinate space
         try {
-            const container = spine.getSlotContainer(slotName);
+            const container = (spine as any).getSlotContainer(slotName);
             container.addChild(g);
         } catch {
             // If we can't get slot container, place relative to bone

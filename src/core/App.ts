@@ -221,11 +221,15 @@ export class App {
             const versionInfo = detectSpineVersion(fileSet);
 
             if (versionInfo.detected === '4.1') {
-                this.showToast('Spine 4.1 detected — loading with 4.2 runtime (mostly compatible)', 'warning');
+                this.showToast('Spine 4.1 detected — loading with 4.1 runtime', 'info');
             }
 
-            const result = await parseSpineFiles(fileSet);
-            this.spineManager.createSpine(result.projectName);
+            const result = await parseSpineFiles(fileSet, versionInfo.detected === '4.1' ? '4.1' : '4.2');
+            if (result.runtimeVersion === '4.1') {
+                this.spineManager.createSpine41(result.skeletonData as any);
+            } else {
+                this.spineManager.createSpine(result.projectName);
+            }
 
             // Build project state
             const project: SpineProjectState = {

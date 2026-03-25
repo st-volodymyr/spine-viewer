@@ -29,6 +29,9 @@ function detectFromBinary(data: Uint8Array): string {
     try {
         let offset = 0;
 
+        // Skip hash: two int32s (8 bytes), same in both 4.1 and 4.2
+        offset += 8;
+
         function readVarInt(): number {
             let result = 0;
             let shift = 0;
@@ -50,7 +53,6 @@ function detectFromBinary(data: Uint8Array): string {
             return str;
         }
 
-        readString(); // skip hash
         const version = readString();
         return version;
     } catch {

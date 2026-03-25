@@ -79,7 +79,7 @@ export class SkeletonInspectorPanel {
         const spineData = this.spineManager.spineData;
         if (!spineData) return;
 
-        const introspection = introspectSkeleton(spineData);
+        const introspection = introspectSkeleton(spineData as any);
         this.clearHighlight();
 
         // Info

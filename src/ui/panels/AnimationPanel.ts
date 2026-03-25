@@ -167,7 +167,7 @@ export class AnimationPanel {
         if (this.queue.length === 0) return;
         const track = parseInt(this.trackSelect.value);
         const list = [...this.queue];
-        this.spineManager.spine?.setAnimationsList(track, list, true);
+        this.spineManager.setAnimationsList(track, list, true);
     }
 
     private clearQueue(): void {

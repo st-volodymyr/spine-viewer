@@ -1,5 +1,7 @@
 import { SpineElement } from '@electricelephants/pixi-ext';
 import type { SkeletonData, TrackEntry, AnimationStateListener } from '@electricelephants/pixi-ext';
+import { Spine as Spine41 } from '@pixi-spine/all-4.1';
+import type { SkeletonData as SkeletonData41 } from '@pixi-spine/all-4.1';
 import { eventBus } from './EventBus';
 import type { Viewport } from './Viewport';
 
@@ -11,8 +13,14 @@ export interface SpineEventData {
     time: number;
 }
 
+type AnySpine = SpineElement | Spine41;
+
+function isSpineElement(s: AnySpine): s is SpineElement {
+    return s instanceof SpineElement;
+}
+
 export class SpineManager {
-    spine: SpineElement | null = null;
+    spine: AnySpine | null = null;
     private viewport: Viewport;
     private projectName: string = '';
     private listener: AnimationStateListener | null = null;
@@ -24,12 +32,20 @@ export class SpineManager {
     createSpine(projectName: string): SpineElement {
         this.destroy();
         this.projectName = projectName;
-
         this.spine = new SpineElement(projectName);
         this.viewport.wrapper.addChild(this.spine);
         this.attachListeners();
+        return this.spine as SpineElement;
+    }
 
-        return this.spine;
+    createSpine41(skeletonData: SkeletonData41): Spine41 {
+        this.destroy();
+        this.projectName = '';
+        const spine41 = new Spine41(skeletonData as any);
+        this.spine = spine41;
+        this.viewport.wrapper.addChild(spine41);
+        this.attachListeners();
+        return spine41;
     }
 
     private attachListeners(): void {
@@ -87,41 +103,49 @@ export class SpineManager {
             },
         };
 
-        this.spine.state.addListener(this.listener);
+        this.spine.state.addListener(this.listener as any);
     }
 
-    get spineData(): SkeletonData | null {
-        return this.spine?.spineData ?? null;
+    get spineData(): SkeletonData | SkeletonData41 | null {
+        if (!this.spine) return null;
+        if (isSpineElement(this.spine)) return this.spine.spineData;
+        return (this.spine as Spine41).spineData as SkeletonData41;
     }
 
     getAnimationNames(): string[] {
-        return this.spineData?.animations.map(a => a.name) ?? [];
+        return this.spineData?.animations.map((a: any) => a.name) ?? [];
     }
 
     getSkinNames(): string[] {
-        return this.spineData?.skins.map(s => s.name) ?? [];
+        return this.spineData?.skins.map((s: any) => s.name) ?? [];
     }
 
     getBoneNames(): string[] {
-        return this.spineData?.bones.map(b => b.name) ?? [];
+        return this.spineData?.bones.map((b: any) => b.name) ?? [];
     }
 
     getSlotNames(): string[] {
-        return this.spineData?.slots.map(s => s.name) ?? [];
+        return this.spineData?.slots.map((s: any) => s.name) ?? [];
     }
 
     getEventNames(): string[] {
-        return this.spineData?.events.map(e => e.name) ?? [];
+        return this.spineData?.events.map((e: any) => e.name) ?? [];
     }
 
     setAnimation(trackIndex: number, name: string, loop: boolean): TrackEntry | null {
         if (!this.spine) return null;
-        return this.spine.setAnimation(trackIndex, name, loop);
+        if (isSpineElement(this.spine)) {
+            return this.spine.setAnimation(trackIndex, name, loop);
+        }
+        return (this.spine.state as any).setAnimation(trackIndex, name, loop);
     }
 
     addAnimation(trackIndex: number, name: string, loop: boolean, delay = 0): TrackEntry | null {
         if (!this.spine) return null;
-        return this.spine.addAnimation(trackIndex, name, loop, delay);
+        if (isSpineElement(this.spine)) {
+            return this.spine.addAnimation(trackIndex, name, loop, delay);
+        }
+        return (this.spine.state as any).addAnimation(trackIndex, name, loop, delay);
     }
 
     setSkin(name: string): void {
@@ -151,22 +175,34 @@ export class SpineManager {
         this.spine.scale.y = Math.abs(this.spine.scale.y) * (flipY ? -1 : 1);
     }
 
+    setAnimationsList(trackIndex: number, names: string[], loop: boolean): void {
+        if (!this.spine) return;
+        if (isSpineElement(this.spine)) {
+            this.spine.setAnimationsList(trackIndex, names, loop);
+        } else {
+            // Fallback for 4.1: queue via state
+            const [first, ...rest] = names;
+            if (first) (this.spine.state as any).setAnimation(trackIndex, first, rest.length === 0 && loop);
+            rest.forEach(name => (this.spine!.state as any).addAnimation(trackIndex, name, loop, 0));
+        }
+    }
+
     resetPose(): void {
         if (!this.spine) return;
         this.spine.skeleton.setToSetupPose();
-        this.spine.state.update(0);
-        this.spine.state.apply(this.spine.skeleton);
+        (this.spine.state as any).update(0);
+        (this.spine.state as any).apply(this.spine.skeleton);
     }
 
     clearTrack(trackIndex: number): void {
         if (!this.spine) return;
         this.spine.state.clearTrack(trackIndex);
-        this.spine.state.setEmptyAnimation(trackIndex, 0);
+        (this.spine.state as any).setEmptyAnimation(trackIndex, 0);
     }
 
     getCurrentTrackInfo(trackIndex: number): { name: string; time: number; duration: number; loop: boolean } | null {
         if (!this.spine) return null;
-        const current = this.spine.state.getCurrent(trackIndex);
+        const current = (this.spine.state as any).getCurrent(trackIndex);
         if (!current || !current.animation) return null;
         return {
             name: current.animation.name,
@@ -179,7 +215,7 @@ export class SpineManager {
     destroy(): void {
         if (this.spine) {
             if (this.listener) {
-                this.spine.state.removeListener(this.listener);
+                this.spine.state.removeListener(this.listener as any);
             }
             this.spine.destroy();
             this.spine = null;
