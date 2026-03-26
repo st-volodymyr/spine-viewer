@@ -154,16 +154,20 @@ export class ComparisonPanel {
             try {
                 const fileSet = await loadSpineFiles(files);
                 const versionInfo = detectSpineVersion(fileSet);
-                const result = await parseSpineFiles(fileSet);
+                const result = await parseSpineFiles(fileSet, versionInfo.detected === '4.1' ? '4.1' : '4.2');
 
                 // Create a new container for this project in the viewport
                 const container = new Container();
                 container.sortableChildren = true;
                 this.viewport.wrapper.addChild(container);
 
-                // Create SpineManager for this project
+                // Create SpineManager for this project (version-aware)
                 const manager = new SpineManager(this.viewport);
-                const spine = manager.createSpine(result.projectName);
+                if (result.runtimeVersion === '4.1') {
+                    manager.createSpine41(result.skeletonData as any);
+                } else {
+                    manager.createSpine(result.projectName);
+                }
 
                 // Position side-by-side
                 const idx = this.projects.length;

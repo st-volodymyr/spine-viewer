@@ -200,6 +200,12 @@ export class SpineManager {
         (this.spine.state as any).setEmptyAnimation(trackIndex, 0);
     }
 
+    setTrackLoop(trackIndex: number, loop: boolean): void {
+        if (!this.spine) return;
+        const current = (this.spine.state as any).getCurrent(trackIndex);
+        if (current) current.loop = loop;
+    }
+
     getCurrentTrackInfo(trackIndex: number): { name: string; time: number; duration: number; loop: boolean } | null {
         if (!this.spine) return null;
         const current = (this.spine.state as any).getCurrent(trackIndex);
@@ -210,6 +216,24 @@ export class SpineManager {
             duration: current.animation.duration,
             loop: current.loop,
         };
+    }
+
+    getAllActiveTracks(): { trackIndex: number; name: string; time: number; duration: number; loop: boolean }[] {
+        if (!this.spine) return [];
+        const results: { trackIndex: number; name: string; time: number; duration: number; loop: boolean }[] = [];
+        for (let i = 0; i < 12; i++) {
+            const current = (this.spine.state as any).getCurrent(i);
+            if (current?.animation) {
+                results.push({
+                    trackIndex: i,
+                    name: current.animation.name,
+                    time: current.trackTime % (current.animation.duration || 1),
+                    duration: current.animation.duration,
+                    loop: current.loop,
+                });
+            }
+        }
+        return results;
     }
 
     destroy(): void {

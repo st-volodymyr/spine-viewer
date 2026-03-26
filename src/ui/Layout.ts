@@ -113,19 +113,52 @@ export class Layout {
         });
         this.toolbar.appendChild(gridBtn);
 
+        // Perf button
+        const perfBtn = document.createElement('button');
+        perfBtn.className = 'sv-btn sv-btn-sm';
+        perfBtn.id = 'sv-perf-btn';
+        perfBtn.textContent = '\uD83D\uDCCA Perf';
+        perfBtn.title = 'Performance stats';
+        this.toolbar.appendChild(perfBtn);
+
         // Spacer
         const spacer = document.createElement('div');
         spacer.style.flex = '1';
         this.toolbar.appendChild(spacer);
 
+        // Compare button
+        const compareBtn = document.createElement('button');
+        compareBtn.className = 'sv-btn sv-btn-sm';
+        compareBtn.textContent = '\u269B Compare';
+        compareBtn.title = 'Open Compare tab to diff two spine files side by side';
+        compareBtn.addEventListener('click', () => {
+            this.activateTab('comparison');
+        });
+        this.toolbar.appendChild(compareBtn);
+
+        this.toolbar.appendChild(this.createSeparator());
+
         // Reset view button
         const resetBtn = document.createElement('button');
         resetBtn.className = 'sv-btn sv-btn-sm';
         resetBtn.textContent = 'Reset View';
+        resetBtn.title = 'Re-center the viewport (keyboard: 0)';
         resetBtn.addEventListener('click', () => {
             eventBus.emit('viewport:reset');
         });
         this.toolbar.appendChild(resetBtn);
+
+        // Clear All button
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'sv-btn sv-btn-sm';
+        clearBtn.textContent = '\uD83D\uDDD1 Clear All';
+        clearBtn.title = 'Unload current spine and reset to initial state';
+        clearBtn.addEventListener('click', () => {
+            if (confirm('Clear all and reload?')) {
+                window.location.reload();
+            }
+        });
+        this.toolbar.appendChild(clearBtn);
     }
 
     private buildRightPanelTabs(): void {

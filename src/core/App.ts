@@ -3,13 +3,13 @@ import { SpineManager } from './SpineManager';
 import { Viewport } from './Viewport';
 import { eventBus } from './EventBus';
 import { Layout } from '../ui/Layout';
-import { AnimationPanel } from '../ui/panels/AnimationPanel';
-import { PropertiesPanel } from '../ui/panels/PropertiesPanel';
 import { SkeletonInspectorPanel } from '../ui/panels/SkeletonInspector';
 import { PlaceholderPanel } from '../ui/panels/PlaceholderPanel';
 import { AtlasInspectorPanel } from '../ui/panels/AtlasInspector';
 import { EventDebugPanel } from '../ui/panels/EventDebugPanel';
 import { ComparisonPanel } from '../ui/panels/ComparisonPanel';
+import { QuickAccessPanel } from '../ui/panels/QuickAccessPanel';
+import { PerformancePanel } from '../ui/panels/PerformancePanel';
 import { loadSpineFiles, createFileInput, setupDragDrop } from '../services/FileLoader';
 import { parseSpineFiles } from '../services/SpineParser';
 import { detectSpineVersion } from '../services/SpineVersionDetector';
@@ -36,6 +36,7 @@ export class App {
         this.buildToolbarButtons();
         this.buildPanels();
         this.buildDropZone();
+        this.buildPerformancePanel();
 
         // Event listeners
         eventBus.on('viewport:reset', () => {
@@ -128,15 +129,14 @@ export class App {
     }
 
     private buildPanels(): void {
-        // Right panel tabs
-        const animPanel = new AnimationPanel(this.stateManager, this.spineManager);
-        this.layout.addTab('animation', 'Animation', animPanel.element);
+        const skeletonInspector = new SkeletonInspectorPanel(this.spineManager);
+        this.layout.addTab('inspect', 'Inspect', skeletonInspector.element);
 
-        const propsPanel = new PropertiesPanel(this.stateManager, this.spineManager);
-        this.layout.addTab('properties', 'Properties', propsPanel.element);
+        const atlasInspector = new AtlasInspectorPanel();
+        this.layout.addTab('atlas', 'Atlas', atlasInspector.element);
 
         const placeholderPanel = new PlaceholderPanel(this.stateManager, this.spineManager);
-        this.layout.addTab('placeholders', 'Placeholders', placeholderPanel.element);
+        this.layout.addTab('placeholders', 'Slots', placeholderPanel.element);
 
         const eventPanel = new EventDebugPanel();
         this.layout.addTab('events', 'Events', eventPanel.element);
@@ -144,25 +144,15 @@ export class App {
         const comparisonPanel = new ComparisonPanel(this.viewport);
         this.layout.addTab('comparison', 'Compare', comparisonPanel.element);
 
-        // Left panel: Skeleton Inspector + Atlas Inspector
-        const skeletonInspector = new SkeletonInspectorPanel(this.spineManager);
-        this.layout.leftPanel.appendChild(skeletonInspector.element);
+        // Left panel: ONLY QuickAccessPanel
+        const quickAccess = new QuickAccessPanel(this.stateManager, this.spineManager);
+        this.layout.leftPanel.appendChild(quickAccess.element);
+    }
 
-        const atlasInspector = new AtlasInspectorPanel();
-        // Add separator
-        const separator = document.createElement('div');
-        separator.style.borderTop = '2px solid var(--sv-border)';
-        separator.style.margin = '4px 0';
-        this.layout.leftPanel.appendChild(separator);
-
-        const atlasHeader = document.createElement('div');
-        atlasHeader.className = 'sv-section-header';
-        atlasHeader.innerHTML = '<span class="sv-section-arrow">\u25BC</span><span>Atlas Inspector</span>';
-        atlasHeader.addEventListener('click', () => {
-            atlasHeader.classList.toggle('collapsed');
-        });
-        this.layout.leftPanel.appendChild(atlasHeader);
-        this.layout.leftPanel.appendChild(atlasInspector.element);
+    private buildPerformancePanel(): void {
+        const perfPanel = new PerformancePanel(this.viewport, this.spineManager);
+        const perfBtn = document.getElementById('sv-perf-btn');
+        if (perfBtn) perfBtn.addEventListener('click', () => perfPanel.toggle());
     }
 
     private buildDropZone(): void {

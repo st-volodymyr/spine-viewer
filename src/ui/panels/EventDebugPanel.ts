@@ -3,131 +3,170 @@ import type { SpineEventData } from '../../core/SpineManager';
 
 export class EventDebugPanel {
     element: HTMLElement;
-    private logEl!: HTMLElement;
-    private filters: Map<string, boolean> = new Map();
-    private maxEntries = 200;
+    private typeFilters: Map<string, boolean> = new Map();
+    private nameFilters: Map<string, boolean> = new Map();
+    private nameFilterEl!: HTMLElement;
+    private toastContainer: HTMLElement | null = null;
 
     constructor() {
         this.element = document.createElement('div');
         this.element.style.display = 'flex';
         this.element.style.flexDirection = 'column';
-        this.element.style.height = '100%';
+        this.element.style.padding = '8px 0';
         this.build();
 
         eventBus.on('spine:event', (data: SpineEventData) => this.onSpineEvent(data));
+        eventBus.on('project:change', () => { this.nameFilters.clear(); this.renderNameFilters(); });
     }
 
     private build(): void {
-        // Filter toggles
-        const filterRow = document.createElement('div');
-        filterRow.style.display = 'flex';
-        filterRow.style.flexWrap = 'wrap';
-        filterRow.style.gap = '4px';
-        filterRow.style.padding = '4px 0';
-        filterRow.style.borderBottom = '1px solid var(--sv-border)';
-        filterRow.style.flexShrink = '0';
+        const intro = document.createElement('div');
+        intro.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 0 8px;line-height:1.5';
+        intro.innerHTML = 'Toggle event types to show them as on-canvas notifications.<br><strong>Note:</strong> <em>start</em> fires once per animation start — re-select an animation after enabling to test it. <em>complete</em> fires every loop cycle.';
+        this.element.appendChild(intro);
 
-        const types = ['start', 'complete', 'end', 'interrupt', 'dispose', 'event'];
+        // ── Lifecycle event type toggles ──
+        const lifeCycleLabel = document.createElement('div');
+        lifeCycleLabel.style.cssText = 'font-size:10px;color:var(--sv-text-muted);font-weight:600;letter-spacing:0.4px;padding:0 0 4px';
+        lifeCycleLabel.textContent = 'LIFECYCLE EVENTS';
+        this.element.appendChild(lifeCycleLabel);
+
+        const typeRow = document.createElement('div');
+        typeRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding-bottom:12px';
+
+        const lifecycleTypes = ['start', 'complete', 'end', 'interrupt', 'dispose'];
         const colors: Record<string, string> = {
-            start: '#4a9a5a',
-            complete: '#4a7fb5',
-            end: '#808080',
-            interrupt: '#c08a30',
-            dispose: '#c05050',
-            event: '#9a4ab5',
+            start: '#4a9a5a', complete: '#4a7fb5', end: '#808080',
+            interrupt: '#c08a30', dispose: '#c05050', event: '#9a4ab5',
         };
 
-        types.forEach(type => {
-            this.filters.set(type, true);
+        lifecycleTypes.forEach(type => {
+            // Default OFF for lifecycle events
+            this.typeFilters.set(type, false);
             const btn = document.createElement('button');
             btn.className = 'sv-btn sv-btn-sm';
             btn.textContent = type;
-            btn.style.borderLeftWidth = '3px';
-            btn.style.borderLeftColor = colors[type];
-            btn.style.fontSize = '10px';
-            btn.style.padding = '1px 6px';
+            btn.style.cssText = `border-left-width:3px;border-left-color:${colors[type]};font-size:10px;padding:1px 6px;opacity:0.35`;
             btn.addEventListener('click', () => {
-                const enabled = !this.filters.get(type);
-                this.filters.set(type, enabled);
-                btn.style.opacity = enabled ? '1' : '0.4';
+                const enabled = !this.typeFilters.get(type);
+                this.typeFilters.set(type, enabled);
+                btn.style.opacity = enabled ? '1' : '0.35';
             });
-            filterRow.appendChild(btn);
+            typeRow.appendChild(btn);
         });
 
-        // Clear button
-        const clearBtn = document.createElement('button');
-        clearBtn.className = 'sv-btn sv-btn-sm';
-        clearBtn.textContent = 'Clear';
-        clearBtn.style.marginLeft = 'auto';
-        clearBtn.style.fontSize = '10px';
-        clearBtn.style.padding = '1px 6px';
-        clearBtn.addEventListener('click', () => {
-            this.logEl.innerHTML = '';
+        this.element.appendChild(typeRow);
+
+        // ── Custom events section ──
+        const customLabel = document.createElement('div');
+        customLabel.style.cssText = 'font-size:10px;color:var(--sv-text-muted);font-weight:600;letter-spacing:0.4px;padding:0 0 4px';
+        customLabel.textContent = 'CUSTOM EVENTS';
+        this.element.appendChild(customLabel);
+
+        // Default ON for custom event type
+        this.typeFilters.set('event', true);
+
+        const customTypeRow = document.createElement('div');
+        customTypeRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding-bottom:8px';
+        const eventTypeBtn = document.createElement('button');
+        eventTypeBtn.className = 'sv-btn sv-btn-sm';
+        eventTypeBtn.textContent = 'event';
+        eventTypeBtn.style.cssText = `border-left-width:3px;border-left-color:${colors['event']};font-size:10px;padding:1px 6px`;
+        eventTypeBtn.addEventListener('click', () => {
+            const enabled = !this.typeFilters.get('event');
+            this.typeFilters.set('event', enabled);
+            eventTypeBtn.style.opacity = enabled ? '1' : '0.35';
         });
-        filterRow.appendChild(clearBtn);
+        customTypeRow.appendChild(eventTypeBtn);
+        this.element.appendChild(customTypeRow);
 
-        this.element.appendChild(filterRow);
+        const nameLbl = document.createElement('div');
+        nameLbl.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 0 4px';
+        nameLbl.textContent = 'Per-event filters (auto-populated on first trigger):';
+        this.element.appendChild(nameLbl);
 
-        // Event log
-        this.logEl = document.createElement('div');
-        this.logEl.style.flex = '1';
-        this.logEl.style.overflow = 'auto';
-        this.logEl.style.fontFamily = 'var(--sv-font-mono)';
-        this.logEl.style.fontSize = '11px';
-        this.logEl.style.lineHeight = '1.4';
-        this.element.appendChild(this.logEl);
+        this.nameFilterEl = document.createElement('div');
+        this.nameFilterEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
+        this.element.appendChild(this.nameFilterEl);
+        this.renderNameFilters();
+    }
+
+    private renderNameFilters(): void {
+        this.nameFilterEl.innerHTML = '';
+        if (this.nameFilters.size === 0) {
+            const empty = document.createElement('span');
+            empty.style.cssText = 'font-size:10px;color:var(--sv-text-muted)';
+            empty.textContent = 'none yet \u2014 play an animation with custom events';
+            this.nameFilterEl.appendChild(empty);
+            return;
+        }
+        this.nameFilters.forEach((enabled, name) => {
+            const btn = document.createElement('button');
+            btn.className = 'sv-btn sv-btn-sm';
+            btn.textContent = name;
+            btn.style.cssText = 'font-size:10px;padding:1px 6px;background:rgba(154,74,181,0.1);border-color:#9a4ab5';
+            btn.style.opacity = enabled ? '1' : '0.35';
+            btn.addEventListener('click', () => {
+                const next = !this.nameFilters.get(name);
+                this.nameFilters.set(name, next);
+                btn.style.opacity = next ? '1' : '0.35';
+            });
+            this.nameFilterEl.appendChild(btn);
+        });
     }
 
     private onSpineEvent(data: SpineEventData): void {
-        if (!this.filters.get(data.type)) return;
-
-        // Limit entries
-        while (this.logEl.children.length >= this.maxEntries) {
-            this.logEl.removeChild(this.logEl.firstChild!);
+        // Register custom event names
+        if (data.type === 'event' && data.eventName) {
+            if (!this.nameFilters.has(data.eventName)) {
+                this.nameFilters.set(data.eventName, true);
+                this.renderNameFilters();
+            }
+            if (this.nameFilters.get(data.eventName) === false) return;
         }
+
+        if (!this.typeFilters.get(data.type)) return;
+
+        const label = data.type === 'event' && data.eventName
+            ? `\u2605 ${data.eventName}`
+            : `${data.type}${data.animationName ? ': ' + data.animationName : ''}`;
 
         const colors: Record<string, string> = {
-            start: '#4a9a5a',
-            complete: '#4a7fb5',
-            end: '#808080',
-            interrupt: '#c08a30',
-            dispose: '#c05050',
-            event: '#9a4ab5',
+            start: 'rgba(74,154,90,0.85)', complete: 'rgba(74,127,181,0.85)',
+            end: 'rgba(100,100,100,0.8)', interrupt: 'rgba(192,138,48,0.85)',
+            dispose: 'rgba(192,80,80,0.85)', event: 'rgba(154,74,181,0.85)',
         };
+        this.showCanvasToast(label, colors[data.type] ?? 'rgba(60,60,60,0.85)', `T${data.trackIndex}`);
+    }
 
-        const entry = document.createElement('div');
-        entry.style.padding = '1px 4px';
-        entry.style.borderBottom = '1px solid var(--sv-border-light)';
+    private showCanvasToast(text: string, bg: string, badge?: string): void {
+        const viewport = document.querySelector('.sv-viewport');
+        if (!viewport) return;
 
-        const typeSpan = document.createElement('span');
-        typeSpan.textContent = data.type.padEnd(10);
-        typeSpan.style.color = colors[data.type] ?? 'inherit';
-        typeSpan.style.fontWeight = '600';
-        entry.appendChild(typeSpan);
-
-        const trackSpan = document.createElement('span');
-        trackSpan.textContent = `T${data.trackIndex} `;
-        trackSpan.style.color = 'var(--sv-text-muted)';
-        entry.appendChild(trackSpan);
-
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = data.animationName;
-        entry.appendChild(nameSpan);
-
-        if (data.eventName) {
-            const eventSpan = document.createElement('span');
-            eventSpan.textContent = ` [${data.eventName}]`;
-            eventSpan.style.color = '#9a4ab5';
-            entry.appendChild(eventSpan);
+        if (!this.toastContainer) {
+            this.toastContainer = document.createElement('div');
+            this.toastContainer.style.cssText = 'position:absolute;bottom:8px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none';
+            viewport.appendChild(this.toastContainer);
         }
 
-        const timeSpan = document.createElement('span');
-        timeSpan.textContent = ` ${data.time.toFixed(3)}s`;
-        timeSpan.style.color = 'var(--sv-text-muted)';
-        timeSpan.style.marginLeft = 'auto';
-        entry.appendChild(timeSpan);
+        const toast = document.createElement('div');
+        toast.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 12px;border-radius:12px;background:${bg};color:#fff;font-size:12px;font-family:monospace;white-space:nowrap`;
 
-        this.logEl.appendChild(entry);
-        this.logEl.scrollTop = this.logEl.scrollHeight;
+        if (badge) {
+            const b = document.createElement('span');
+            b.style.cssText = 'font-size:10px;opacity:0.7';
+            b.textContent = badge;
+            toast.appendChild(b);
+        }
+        const t = document.createElement('span');
+        t.textContent = text;
+        toast.appendChild(t);
+
+        this.toastContainer.appendChild(toast);
+        setTimeout(() => {
+            toast.style.transition = 'opacity 0.3s';
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+        }, 1800);
     }
 }

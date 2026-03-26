@@ -24,6 +24,9 @@ export class SkeletonInspectorPanel {
         this.tabBar = document.createElement('div');
         this.tabBar.className = 'sv-tabs';
         this.tabBar.style.fontSize = 'var(--sv-font-size-sm)';
+        this.tabBar.style.overflowX = 'auto';
+        this.tabBar.style.scrollbarWidth = 'none';
+        (this.tabBar.style as any)['-webkit-overflow-scrolling'] = 'touch';
         this.element.appendChild(this.tabBar);
 
         // Content area
