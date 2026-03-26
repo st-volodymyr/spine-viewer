@@ -77,6 +77,9 @@ export class QuickAccessPanel {
             this.isPaused = false;
             this.queue = [];
             this.triggers = [];
+            for (const [, rowData] of this.activeTrackRows) {
+                rowData.row.remove();
+            }
             this.activeTrackRows.clear();
             if (this.trackStatusEl) {
                 this.trackStatusEl.innerHTML = '';
