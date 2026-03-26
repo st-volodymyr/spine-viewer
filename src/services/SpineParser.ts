@@ -49,6 +49,12 @@ export async function parseSpineFiles(fileSet: SpineFileSet, spineVersion: '4.1'
 }
 
 async function parseSpineFiles41(fileSet: SpineFileSet, projectName: string): Promise<ParseResult41> {
+    // Pre-parse atlas text to read page metadata (PMA flags) — avoids TDZ issue
+    // where the TextureAtlas41 constructor calls the texture callback synchronously
+    // before the `const a = ...` assignment completes.
+    const tempAtlas = new TextureAtlas(fileSet.atlas.data);
+    const pageMetaMap = new Map(tempAtlas.pages.map(p => [p.name, p]));
+
     // Build TextureAtlas using @pixi-spine/base's callback-based API
     const atlas = await new Promise<TextureAtlas41>((resolve) => {
         const a = new TextureAtlas41(fileSet.atlas.data, (pageName, loaderFn) => {
@@ -57,7 +63,7 @@ async function parseSpineFiles41(fileSet: SpineFileSet, projectName: string): Pr
                 t.name.toLowerCase() === pageName.toLowerCase()
             );
             if (tex) {
-                const page = a.pages.find(p => p.name === pageName);
+                const page = pageMetaMap.get(pageName);
                 const alphaMode = page?.pma ? ALPHA_MODES.PMA : ALPHA_MODES.PREMULTIPLY_ON_UPLOAD;
                 loaderFn(new BaseTexture(tex.data, { alphaMode }));
             } else {
