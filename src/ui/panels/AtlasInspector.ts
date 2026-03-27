@@ -9,9 +9,11 @@ export class AtlasInspectorPanel {
     private previewCanvas!: HTMLCanvasElement;
     private previewCtx!: CanvasRenderingContext2D;
     private detailPanel!: HTMLElement;
+    private statsPanel!: HTMLElement;
     private atlasData: ParsedAtlas | null = null;
     private textureImages: Map<string, HTMLImageElement> = new Map();
     private selectedRegion: AtlasRegion | null = null;
+    private usedRegionNames: Set<string> = new Set();
 
     constructor() {
         this.element = document.createElement('div');
@@ -19,39 +21,29 @@ export class AtlasInspectorPanel {
         this.element.style.flexDirection = 'column';
         this.build();
 
-        eventBus.on('atlas:loaded', (data: { atlas: ParsedAtlas; textures: SpineFileSet['textures'] }) => {
+        eventBus.on('atlas:loaded', (data: { atlas: ParsedAtlas; textures: SpineFileSet['textures']; usedRegionNames?: Set<string> }) => {
+            this.usedRegionNames = data.usedRegionNames ?? new Set();
             this.setAtlasData(data.atlas, data.textures);
         });
     }
 
     private build(): void {
-        // Search
-        this.searchInput = document.createElement('input');
-        this.searchInput.className = 'sv-tree-search';
-        this.searchInput.placeholder = 'Search regions...';
-        this.searchInput.addEventListener('input', () => this.renderRegionList());
-        this.element.appendChild(this.searchInput);
-
-        // View full atlas button row
-        const viewRow = document.createElement('div');
-        viewRow.style.cssText = 'display:flex;gap:4px;padding:4px 0;align-items:center';
-        const viewBtn = document.createElement('button');
-        viewBtn.className = 'sv-btn sv-btn-sm sv-btn-primary';
-        viewBtn.textContent = '\uD83D\uDDBC View Full Atlas';
-        viewBtn.style.flex = '1';
-        viewBtn.addEventListener('click', () => this.openAtlasViewer());
-        viewRow.appendChild(viewBtn);
-        this.element.appendChild(viewRow);
+        // Stats overview (shown when atlas is loaded)
+        this.statsPanel = document.createElement('div');
+        this.statsPanel.style.padding = '4px 0';
+        this.element.appendChild(this.statsPanel);
 
         // Preview canvas
         const previewWrap = document.createElement('div');
         previewWrap.style.position = 'relative';
-        previewWrap.style.height = '150px';
+        previewWrap.style.height = '120px';
         previewWrap.style.background = 'var(--sv-bg-viewport)';
         previewWrap.style.border = '1px solid var(--sv-border)';
         previewWrap.style.borderRadius = 'var(--sv-radius)';
         previewWrap.style.overflow = 'hidden';
         previewWrap.style.flexShrink = '0';
+        previewWrap.style.display = 'none'; // Hidden until a region is selected
+        previewWrap.id = 'sv-atlas-preview-wrap';
         this.previewCanvas = document.createElement('canvas');
         this.previewCanvas.style.width = '100%';
         this.previewCanvas.style.height = '100%';
@@ -59,24 +51,42 @@ export class AtlasInspectorPanel {
         this.previewCtx = this.previewCanvas.getContext('2d')!;
         this.element.appendChild(previewWrap);
 
-        // Detail panel
+        // Detail panel (shown when a region is selected)
         this.detailPanel = document.createElement('div');
         this.detailPanel.className = 'sv-detail-panel';
         this.detailPanel.style.flexShrink = '0';
-        this.detailPanel.style.maxHeight = '100px';
-        this.detailPanel.style.overflow = 'auto';
         this.element.appendChild(this.detailPanel);
+
+        // Search
+        this.searchInput = document.createElement('input');
+        this.searchInput.className = 'sv-tree-search';
+        this.searchInput.placeholder = 'Filter regions...';
+        this.searchInput.style.margin = '4px 0';
+        this.searchInput.addEventListener('input', () => this.renderRegionList());
+        this.element.appendChild(this.searchInput);
+
+        // View full atlas button
+        const viewBtn = document.createElement('button');
+        viewBtn.className = 'sv-btn sv-btn-sm';
+        viewBtn.textContent = 'View Full Atlas';
+        viewBtn.style.width = '100%';
+        viewBtn.style.justifyContent = 'center';
+        viewBtn.style.marginBottom = '4px';
+        viewBtn.addEventListener('click', () => this.openAtlasViewer());
+        this.element.appendChild(viewBtn);
 
         // Region list
         this.regionList = document.createElement('div');
-        this.regionList.style.maxHeight = '320px';
+        this.regionList.style.flex = '1';
         this.regionList.style.overflowY = 'auto';
+        this.regionList.style.minHeight = '0';
         this.element.appendChild(this.regionList);
     }
 
     setAtlasData(atlas: ParsedAtlas, textures: SpineFileSet['textures']): void {
         this.atlasData = atlas;
         this.textureImages.clear();
+        this.selectedRegion = null;
 
         // Load texture images
         textures.forEach(tex => {
@@ -85,7 +95,80 @@ export class AtlasInspectorPanel {
             this.textureImages.set(tex.name, img);
         });
 
+        this.renderStats();
         this.renderRegionList();
+    }
+
+    private renderStats(): void {
+        this.statsPanel.innerHTML = '';
+        if (!this.atlasData) return;
+
+        const { pages, regions } = this.atlasData;
+
+        // Calculate total texture area
+        let totalPixels = 0;
+        let usedPixels = 0;
+        pages.forEach(p => { totalPixels += p.width * p.height; });
+        regions.forEach(r => { usedPixels += r.width * r.height; });
+        const packing = totalPixels > 0 ? Math.round((usedPixels / totalPixels) * 100) : 0;
+
+        // Count rotated regions
+        const rotated = regions.filter(r => r.rotate).length;
+
+        // Find size extremes
+        const areas = regions.map(r => r.width * r.height);
+        const largest = areas.length > 0 ? Math.max(...areas) : 0;
+        const smallest = areas.length > 0 ? Math.min(...areas) : 0;
+
+        // Stats grid
+        const grid = document.createElement('div');
+        grid.className = 'sv-atlas-stats';
+
+        const stats: [string, string][] = [
+            ['Pages', String(pages.length)],
+            ['Regions', String(regions.length)],
+            ['Packing', `${packing}%`],
+            ['Rotated', String(rotated)],
+        ];
+
+        // Usage stats
+        const unusedCount = this.usedRegionNames.size > 0
+            ? regions.filter(r => !this.usedRegionNames.has(r.name)).length
+            : 0;
+        if (this.usedRegionNames.size > 0) {
+            stats.push(['Unused', String(unusedCount)]);
+        }
+
+        stats.forEach(([label, value]) => {
+            const cell = document.createElement('div');
+            cell.className = 'sv-atlas-stat';
+            const valEl = document.createElement('div');
+            valEl.className = 'sv-atlas-stat-value';
+            valEl.textContent = value;
+            cell.appendChild(valEl);
+            const lblEl = document.createElement('div');
+            lblEl.className = 'sv-atlas-stat-label';
+            lblEl.textContent = label;
+            cell.appendChild(lblEl);
+            grid.appendChild(cell);
+        });
+
+        this.statsPanel.appendChild(grid);
+
+        // Page info
+        pages.forEach(page => {
+            const pageRegions = regions.filter(r => r.page === page.name);
+            const pageUsed = pageRegions.reduce((sum, r) => sum + r.width * r.height, 0);
+            const pagePct = page.width * page.height > 0 ? Math.round((pageUsed / (page.width * page.height)) * 100) : 0;
+
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;font-size:var(--sv-font-size-sm);color:var(--sv-text-secondary)';
+            row.innerHTML = `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${page.name}">${page.name}</span>` +
+                `<span style="font-family:var(--sv-font-mono);color:var(--sv-text-muted)">${page.width}\u00D7${page.height}</span>` +
+                `<span style="font-family:var(--sv-font-mono)">${pageRegions.length} rgn</span>` +
+                `<span style="font-family:var(--sv-font-mono);color:${pagePct > 80 ? 'var(--sv-success)' : pagePct > 50 ? 'var(--sv-warning)' : 'var(--sv-error)'}">${pagePct}%</span>`;
+            this.statsPanel.appendChild(row);
+        });
     }
 
     private renderRegionList(): void {
@@ -107,37 +190,57 @@ export class AtlasInspectorPanel {
         byPage.forEach((pageRegions, pageName) => {
             // Page header
             const pageHeader = document.createElement('div');
-            pageHeader.className = 'sv-section-header';
-            pageHeader.innerHTML = `<span class="sv-section-arrow">\u25BC</span><span>${pageName}</span><span class="sv-tree-badge">${pageRegions.length}</span>`;
+            pageHeader.className = 'sv-atlas-page-header';
+            const arrow = document.createElement('span');
+            arrow.className = 'sv-section-arrow';
+            arrow.textContent = '\u25BC';
+            pageHeader.appendChild(arrow);
+            const nameEl = document.createElement('span');
+            nameEl.style.flex = '1';
+            nameEl.textContent = pageName;
+            pageHeader.appendChild(nameEl);
+            const badge = document.createElement('span');
+            badge.style.cssText = 'font-size:10px;color:var(--sv-text-muted);font-family:var(--sv-font-mono)';
+            badge.textContent = String(pageRegions.length);
+            pageHeader.appendChild(badge);
+
+            let collapsed = false;
             pageHeader.addEventListener('click', () => {
-                pageHeader.classList.toggle('collapsed');
+                collapsed = !collapsed;
+                arrow.style.transform = collapsed ? 'rotate(-90deg)' : '';
+                pageBody.style.display = collapsed ? 'none' : 'block';
             });
             this.regionList.appendChild(pageHeader);
 
             const pageBody = document.createElement('div');
-            pageBody.className = 'sv-section-body';
-            pageBody.style.padding = '0';
 
             pageRegions.forEach(region => {
                 const row = document.createElement('div');
-                row.className = 'sv-tree-node-row';
-                row.style.padding = '2px 8px';
-                row.style.fontSize = 'var(--sv-font-size-sm)';
+                row.className = 'sv-atlas-region-row';
+                if (this.selectedRegion === region) row.classList.add('selected');
+
+                if (this.usedRegionNames.size > 0) {
+                    const dot = document.createElement('span');
+                    const isUsed = this.usedRegionNames.has(region.name);
+                    dot.style.cssText = `width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${isUsed ? 'var(--sv-success)' : 'var(--sv-text-muted)'}`;
+                    dot.title = isUsed ? 'Referenced in skin' : 'Not referenced in any skin';
+                    row.appendChild(dot);
+                }
 
                 const name = document.createElement('span');
-                name.style.flex = '1';
+                name.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
                 name.textContent = region.name;
                 row.appendChild(name);
 
                 const size = document.createElement('span');
-                size.className = 'sv-tree-badge';
-                size.textContent = `${region.width}x${region.height}`;
+                size.style.cssText = 'font-size:10px;color:var(--sv-text-muted);font-family:var(--sv-font-mono);flex-shrink:0';
+                size.textContent = `${region.width}\u00D7${region.height}`;
+                if (region.rotate) size.textContent += ' R';
                 row.appendChild(size);
 
                 row.addEventListener('click', () => {
                     this.selectRegion(region);
-                    // Highlight selected
-                    this.regionList.querySelectorAll('.sv-tree-node-row.selected').forEach(el => el.classList.remove('selected'));
+                    this.regionList.querySelectorAll('.sv-atlas-region-row.selected').forEach(el => el.classList.remove('selected'));
                     row.classList.add('selected');
                 });
 
@@ -151,25 +254,35 @@ export class AtlasInspectorPanel {
     private selectRegion(region: AtlasRegion): void {
         this.selectedRegion = region;
 
+        // Show preview
+        const previewWrap = document.getElementById('sv-atlas-preview-wrap');
+        if (previewWrap) previewWrap.style.display = 'block';
+
         // Update detail panel
         this.detailPanel.innerHTML = '';
         const details: [string, string][] = [
             ['Name', region.name],
             ['Page', region.page],
             ['Position', `${region.x}, ${region.y}`],
-            ['Size', `${region.width} x ${region.height}`],
-            ['Original', `${region.originalWidth} x ${region.originalHeight}`],
+            ['Size', `${region.width} \u00D7 ${region.height}`],
+            ['Original', `${region.originalWidth} \u00D7 ${region.originalHeight}`],
             ['Offset', `${region.offsetX}, ${region.offsetY}`],
             ['Rotate', String(region.rotate)],
         ];
         details.forEach(([key, value]) => {
             const row = document.createElement('div');
             row.className = 'sv-detail-row';
-            row.innerHTML = `<span class="sv-detail-key">${key}</span><span class="sv-detail-value">${value}</span>`;
+            const keyEl = document.createElement('span');
+            keyEl.className = 'sv-detail-key';
+            keyEl.textContent = key;
+            row.appendChild(keyEl);
+            const valEl = document.createElement('span');
+            valEl.className = 'sv-detail-value';
+            valEl.textContent = value;
+            row.appendChild(valEl);
             this.detailPanel.appendChild(row);
         });
 
-        // Draw preview
         this.drawPreview(region);
     }
 
@@ -180,14 +293,13 @@ export class AtlasInspectorPanel {
         overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center';
 
         const box = document.createElement('div');
-        box.style.cssText = 'background:var(--sv-bg-surface);border-radius:var(--sv-radius-lg);padding:16px;display:flex;flex-direction:column;gap:8px;max-width:90vw;max-height:90vh';
+        box.style.cssText = 'background:var(--sv-bg-surface);border:1px solid var(--sv-border);border-radius:var(--sv-radius-lg);padding:12px;display:flex;flex-direction:column;gap:6px;max-width:90vw;max-height:90vh';
 
         // Title + close
         const titleRow = document.createElement('div');
         titleRow.style.cssText = 'display:flex;align-items:center;gap:8px';
         const title = document.createElement('span');
-        title.style.fontWeight = '600';
-        title.style.flex = '1';
+        title.style.cssText = 'font-weight:600;flex:1;font-size:13px';
         title.textContent = 'Atlas Viewer';
         titleRow.appendChild(title);
 
@@ -207,7 +319,7 @@ export class AtlasInspectorPanel {
 
         const closeBtn = document.createElement('button');
         closeBtn.className = 'sv-btn sv-btn-sm';
-        closeBtn.textContent = '\u00D7 Close';
+        closeBtn.textContent = '\u00D7';
         closeBtn.addEventListener('click', () => overlay.remove());
         titleRow.appendChild(closeBtn);
         box.appendChild(titleRow);
@@ -239,7 +351,7 @@ export class AtlasInspectorPanel {
             const cs = 16;
             for (let y = 0; y < canvas.height; y += cs) {
                 for (let x = 0; x < canvas.width; x += cs) {
-                    ctx.fillStyle = ((x / cs + y / cs) % 2 === 0) ? '#999' : '#bbb';
+                    ctx.fillStyle = ((x / cs + y / cs) % 2 === 0) ? '#333' : '#3a3a3a';
                     ctx.fillRect(x, y, cs, cs);
                 }
             }
@@ -248,13 +360,13 @@ export class AtlasInspectorPanel {
 
             // Draw region outlines
             const regions = this.atlasData!.regions.filter(r => r.page === pageName);
-            ctx.strokeStyle = 'rgba(74,127,181,0.8)';
+            ctx.strokeStyle = 'rgba(138,180,248,0.6)';
             ctx.lineWidth = 1;
             regions.forEach(r => {
                 ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.width, r.height);
             });
 
-            infoEl.textContent = `${page.name} — ${canvas.width}\u00D7${canvas.height}px — ${regions.length} regions`;
+            infoEl.textContent = `${page.name} \u2014 ${canvas.width}\u00D7${canvas.height}px \u2014 ${regions.length} regions`;
 
             // Hover tooltip
             canvas.onmousemove = (e) => {
@@ -270,7 +382,7 @@ export class AtlasInspectorPanel {
 
         // Scale canvas to fit
         canvas.style.maxWidth = 'min(80vw, 900px)';
-        canvas.style.maxHeight = 'calc(90vh - 120px)';
+        canvas.style.maxHeight = 'calc(90vh - 100px)';
         canvas.style.width = 'auto';
         canvas.style.height = 'auto';
 
@@ -295,23 +407,23 @@ export class AtlasInspectorPanel {
         const canvas = this.previewCanvas;
         const ctx = this.previewCtx;
         canvas.width = canvas.parentElement!.clientWidth || 240;
-        canvas.height = canvas.parentElement!.clientHeight || 150;
+        canvas.height = canvas.parentElement!.clientHeight || 120;
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Draw checkerboard
+        // Draw checkerboard (dark)
         const checkSize = 8;
         for (let y = 0; y < canvas.height; y += checkSize) {
             for (let x = 0; x < canvas.width; x += checkSize) {
-                ctx.fillStyle = ((x / checkSize + y / checkSize) % 2 === 0) ? '#ccc' : '#ddd';
+                ctx.fillStyle = ((x / checkSize + y / checkSize) % 2 === 0) ? '#2a2a2a' : '#333';
                 ctx.fillRect(x, y, checkSize, checkSize);
             }
         }
 
         // Draw region centered
         const scale = Math.min(
-            (canvas.width - 20) / region.width,
-            (canvas.height - 20) / region.height,
+            (canvas.width - 16) / region.width,
+            (canvas.height - 16) / region.height,
             2
         );
         const drawW = region.width * scale;
@@ -319,7 +431,6 @@ export class AtlasInspectorPanel {
         const drawX = (canvas.width - drawW) / 2;
         const drawY = (canvas.height - drawH) / 2;
 
-        // Ensure image is loaded
         if (img.complete) {
             ctx.drawImage(
                 img,

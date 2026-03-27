@@ -266,6 +266,17 @@ export class PlaceholderPanel {
         g.lineStyle(1, 0xff6600, 0.5);
         g.drawCircle(0, 0, size);
 
+        const label = new Text(slotName, {
+            fontSize: 9,
+            fill: '#ff8800',
+            fontFamily: 'Arial',
+            fontWeight: 'bold',
+            stroke: '#000000',
+            strokeThickness: 2,
+        } as any);
+        label.position.set(size + 3, -5);
+        g.addChild(label);
+
         const slotContainer = this.getSlotContainer(slotName);
         if (slotContainer) {
             slotContainer.addChild(g);
@@ -357,6 +368,40 @@ export class PlaceholderPanel {
             fontFamilySelect.appendChild(opt);
         });
         makeRow('Font family', fontFamilySelect);
+
+        const fontLoadBtn = document.createElement('button');
+        fontLoadBtn.className = 'sv-btn sv-btn-sm';
+        fontLoadBtn.textContent = 'Load font\u2026';
+        fontLoadBtn.style.flex = '1';
+        fontLoadBtn.addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.ttf,.otf,.woff,.woff2';
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files?.[0];
+                if (!file) return;
+                const fontName = file.name.replace(/\.[^/.]+$/, '');
+                const reader = new FileReader();
+                reader.onload = async () => {
+                    try {
+                        const face = new FontFace(fontName, reader.result as ArrayBuffer);
+                        await face.load();
+                        (document.fonts as any).add(face);
+                        const opt = document.createElement('option');
+                        opt.value = fontName;
+                        opt.textContent = `${fontName} (custom)`;
+                        opt.selected = true;
+                        fontFamilySelect.appendChild(opt);
+                        fontFamilySelect.value = fontName;
+                    } catch (e) {
+                        console.warn('Failed to load font:', e);
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            });
+            fileInput.click();
+        });
+        makeRow('Custom font', fontLoadBtn);
 
         const boldToggle = document.createElement('input');
         boldToggle.type = 'checkbox';

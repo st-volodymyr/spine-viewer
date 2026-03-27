@@ -3,7 +3,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 12px;
+    padding: 6px 14px;
     border: 1px solid var(--sv-border);
     border-radius: var(--sv-radius);
     background: var(--sv-bg-input);
@@ -11,47 +11,71 @@
     font-family: var(--sv-font-family);
     font-size: var(--sv-font-size);
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.12s, border-color 0.12s;
     white-space: nowrap;
+    height: 32px;
 }
 
 .sv-btn:hover {
     background: var(--sv-bg-hover);
-    border-color: var(--sv-accent);
+    border-color: var(--sv-text-muted);
 }
 
 .sv-btn-primary {
     background: var(--sv-accent);
-    color: white;
+    color: var(--sv-accent-text);
     border-color: var(--sv-accent);
+    font-weight: 500;
 }
 
 .sv-btn-primary:hover {
     background: var(--sv-accent-hover);
+    border-color: var(--sv-accent-hover);
 }
 
 .sv-btn-sm {
-    padding: 2px 8px;
+    padding: 3px 10px;
     font-size: var(--sv-font-size-sm);
+    height: 28px;
 }
 
 .sv-btn-icon {
-    padding: 4px 6px;
-    min-width: 28px;
+    padding: 4px 8px;
+    min-width: 32px;
     justify-content: center;
+}
+
+/* Project name chip in toolbar */
+.sv-project-chip {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--sv-font-mono);
+    font-size: var(--sv-font-size-sm);
+    color: var(--sv-accent);
+    background: var(--sv-accent-light);
+    border: 1px solid color-mix(in srgb, var(--sv-accent) 40%, transparent);
+    border-radius: var(--sv-radius);
+    padding: 2px 8px;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    height: 24px;
+    flex-shrink: 0;
 }
 
 /* Select */
 .sv-select {
-    padding: 3px 8px;
+    padding: 4px 8px;
     border: 1px solid var(--sv-border);
     border-radius: var(--sv-radius);
     background: var(--sv-bg-input);
     color: var(--sv-text-primary);
     font-family: var(--sv-font-family);
-    font-size: var(--sv-font-size);
+    font-size: var(--sv-font-size-sm);
     cursor: pointer;
     min-width: 0;
+    height: 28px;
 }
 
 .sv-select:focus {
@@ -133,9 +157,9 @@
 }
 
 .sv-control-label {
-    font-size: var(--sv-font-size-sm);
+    font-size: var(--sv-font-size);
     color: var(--sv-text-secondary);
-    min-width: 50px;
+    min-width: 48px;
     flex-shrink: 0;
 }
 
@@ -143,14 +167,14 @@
     font-size: var(--sv-font-size-sm);
     color: var(--sv-text-primary);
     font-family: var(--sv-font-mono);
-    min-width: 35px;
+    min-width: 40px;
     text-align: right;
 }
 
 /* Number input */
 .sv-number-input {
     width: 60px;
-    padding: 2px 6px;
+    padding: 4px 6px;
     border: 1px solid var(--sv-border);
     border-radius: var(--sv-radius);
     background: var(--sv-bg-input);
@@ -167,12 +191,12 @@
 
 /* Color picker */
 .sv-color-input {
-    width: 28px;
-    height: 22px;
+    width: 32px;
+    height: 28px;
     border: 1px solid var(--sv-border);
     border-radius: var(--sv-radius);
     cursor: pointer;
-    padding: 0;
+    padding: 2px;
     background: none;
 }
 
@@ -185,12 +209,12 @@
 }
 
 .sv-tab {
-    padding: 6px 12px;
-    font-size: var(--sv-font-size-sm);
-    color: var(--sv-text-secondary);
+    padding: 8px 14px;
+    font-size: var(--sv-font-size);
+    color: var(--sv-text-muted);
     cursor: pointer;
     border-bottom: 2px solid transparent;
-    transition: color 0.15s, border-color 0.15s;
+    transition: color 0.12s, border-color 0.12s;
     user-select: none;
 }
 
@@ -207,4 +231,27 @@
     flex: 1;
     overflow-y: auto;
     padding: 8px;
+}
+
+/* Compare button */
+.sv-btn-compare {
+    border-color: var(--sv-accent);
+    color: var(--sv-accent);
+    font-weight: 500;
+}
+
+.sv-btn-compare:hover {
+    background: var(--sv-accent-light);
+}
+
+/* Active button state (for Compare toggle when ON) */
+.sv-btn-active {
+    background: var(--sv-accent);
+    color: var(--sv-accent-text);
+    border-color: var(--sv-accent);
+    font-weight: 500;
+}
+
+.sv-btn-active:hover {
+    background: var(--sv-accent-hover);
 }

@@ -132,6 +132,11 @@ export class SpineManager {
         return this.spineData?.events.map((e: any) => e.name) ?? [];
     }
 
+    getAnimationDuration(name: string): number | null {
+        const anim = this.spineData?.animations.find((a: any) => a.name === name);
+        return anim ? (anim as any).duration : null;
+    }
+
     setAnimation(trackIndex: number, name: string, loop: boolean): TrackEntry | null {
         if (!this.spine) return null;
         if (isSpineElement(this.spine)) {
@@ -157,6 +162,11 @@ export class SpineManager {
     setSpeed(speed: number): void {
         if (!this.spine) return;
         this.spine.state.timeScale = speed;
+    }
+
+    getSpeed(): number {
+        if (!this.spine) return 1;
+        return this.spine.state.timeScale;
     }
 
     setPaused(paused: boolean): void {
@@ -210,10 +220,11 @@ export class SpineManager {
         if (!this.spine) return null;
         const current = (this.spine.state as any).getCurrent(trackIndex);
         if (!current || !current.animation) return null;
+        const duration = current.animation.duration || 0;
         return {
             name: current.animation.name,
-            time: current.trackTime % current.animation.duration,
-            duration: current.animation.duration,
+            time: duration > 0 ? current.trackTime % duration : 0,
+            duration,
             loop: current.loop,
         };
     }

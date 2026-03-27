@@ -8,7 +8,9 @@ import { PlaceholderPanel } from '../ui/panels/PlaceholderPanel';
 import { AtlasInspectorPanel } from '../ui/panels/AtlasInspector';
 import { EventDebugPanel } from '../ui/panels/EventDebugPanel';
 import { ComparisonPanel } from '../ui/panels/ComparisonPanel';
+import { ComparisonControlPanel } from '../ui/panels/ComparisonControlPanel';
 import { QuickAccessPanel } from '../ui/panels/QuickAccessPanel';
+import { ActiveTracksBar } from '../ui/panels/ActiveTracksBar';
 import { PerformancePanel } from '../ui/panels/PerformancePanel';
 import { loadSpineFiles, createFileInput, setupDragDrop } from '../services/FileLoader';
 import { parseSpineFiles } from '../services/SpineParser';
@@ -23,6 +25,10 @@ export class App {
     private viewport!: Viewport;
     private layout: Layout;
     private dropZone: HTMLElement | null = null;
+    private quickAccessEl!: HTMLElement;
+    private comparisonControlEl!: HTMLElement;
+    private comparisonPanel!: ComparisonPanel;
+    private wasPausedBeforeCompare = false;
 
     constructor(container: HTMLElement) {
         this.stateManager = new StateManager();
@@ -45,6 +51,36 @@ export class App {
             this.stateManager.setViewport({ zoom: 1 });
         });
 
+        // Mode switching: hide/show main spine, swap left panel, hide drop zone
+        eventBus.on('mode:change', (mode: string) => {
+            if (mode === 'comparison') {
+                // Remember pause state and stop main spine
+                if (this.spineManager.spine) {
+                    this.wasPausedBeforeCompare = this.stateManager.projectA?.paused ?? false;
+                    this.spineManager.setPaused(true);
+                    this.spineManager.spine.visible = false;
+                }
+                // Hide drop zone in compare mode
+                if (this.dropZone) {
+                    this.dropZone.style.display = 'none';
+                }
+                this.quickAccessEl.style.display = 'none';
+                this.comparisonControlEl.style.display = 'block';
+            } else {
+                // Restore main spine
+                if (this.spineManager.spine) {
+                    this.spineManager.spine.visible = true;
+                    this.spineManager.setPaused(this.wasPausedBeforeCompare);
+                }
+                // Restore drop zone visibility (only show if no project loaded)
+                if (this.dropZone) {
+                    this.dropZone.style.display = '';
+                }
+                this.quickAccessEl.style.display = 'block';
+                this.comparisonControlEl.style.display = 'none';
+            }
+        });
+
         // FPS and progress updates
         this.viewport.ticker.add(() => this.updateBottomBar());
 
@@ -62,13 +98,23 @@ export class App {
             switch (e.code) {
                 case 'Space': {
                     e.preventDefault();
-                    const project = this.stateManager.projectA;
-                    if (project) {
-                        const paused = !project.paused;
-                        this.spineManager.setPaused(paused);
-                        this.stateManager.updateProjectA({ paused });
-                        const btn = document.getElementById('sv-pause-btn');
-                        if (btn) btn.textContent = paused ? 'Resume' : 'Pause';
+                    if (this.stateManager.mode === 'comparison') {
+                        // Toggle pause on all comparison spines
+                        const projects = this.comparisonPanel.getProjects();
+                        if (projects.length > 0) {
+                            const firstSpine = projects[0].manager.spine;
+                            const shouldPause = firstSpine ? (firstSpine as any).autoUpdate !== false : true;
+                            this.comparisonPanel.setAllPaused(shouldPause);
+                        }
+                    } else {
+                        const project = this.stateManager.projectA;
+                        if (project) {
+                            const paused = !project.paused;
+                            this.spineManager.setPaused(paused);
+                            this.stateManager.updateProjectA({ paused });
+                            const btn = document.getElementById('sv-pause-btn');
+                            if (btn) btn.textContent = paused ? 'Resume' : 'Pause';
+                        }
                     }
                     break;
                 }
@@ -104,28 +150,22 @@ export class App {
     }
 
     private buildToolbarButtons(): void {
-        const group = document.getElementById('sv-toolbar-file-group');
-        if (!group) return;
+        // Open button - opens file picker (accepts files, auto-detects)
+        const openBtn = document.getElementById('sv-toolbar-open-btn');
+        if (openBtn) {
+            openBtn.addEventListener('click', () => {
+                const input = createFileInput(true, (files) => this.handleFiles(files));
+                input.click();
+            });
+        }
 
-        // Open Files button
-        const openBtn = document.createElement('button');
-        openBtn.className = 'sv-btn sv-btn-sm';
-        openBtn.textContent = 'Open Files';
-        openBtn.addEventListener('click', () => {
-            const input = createFileInput(true, (files) => this.handleFiles(files));
-            input.click();
-        });
-        group.appendChild(openBtn);
-
-        // Open Folder button
-        const folderBtn = document.createElement('button');
-        folderBtn.className = 'sv-btn sv-btn-sm';
-        folderBtn.textContent = 'Open Folder';
-        folderBtn.addEventListener('click', () => {
-            const input = createFileInput(true, (files) => this.handleFiles(files), true);
-            input.click();
-        });
-        group.appendChild(folderBtn);
+        // "Add Project" button (toolbar, compare mode)
+        const addProjectBtn = document.getElementById('sv-toolbar-add-project');
+        if (addProjectBtn) {
+            addProjectBtn.addEventListener('click', () => {
+                this.comparisonPanel.addProjectFromToolbar();
+            });
+        }
     }
 
     private buildPanels(): void {
@@ -141,12 +181,22 @@ export class App {
         const eventPanel = new EventDebugPanel();
         this.layout.addTab('events', 'Events', eventPanel.element);
 
-        const comparisonPanel = new ComparisonPanel(this.viewport);
-        this.layout.addTab('comparison', 'Compare', comparisonPanel.element);
+        this.comparisonPanel = new ComparisonPanel(this.viewport);
+        this.layout.addTab('comparison', 'Compare', this.comparisonPanel.element);
 
-        // Left panel: ONLY QuickAccessPanel
+        // Left panel: QuickAccessPanel + ComparisonControlPanel (toggled by mode)
         const quickAccess = new QuickAccessPanel(this.stateManager, this.spineManager);
+        const comparisonControls = new ComparisonControlPanel(this.comparisonPanel);
+        comparisonControls.element.style.display = 'none';
+
         this.layout.leftPanel.appendChild(quickAccess.element);
+        this.layout.leftPanel.appendChild(comparisonControls.element);
+
+        this.quickAccessEl = quickAccess.element;
+        this.comparisonControlEl = comparisonControls.element;
+
+        // Active tracks bar below viewport
+        new ActiveTracksBar(this.layout.viewportTracksBar, this.stateManager, this.spineManager);
     }
 
     private buildPerformancePanel(): void {
@@ -242,6 +292,7 @@ export class App {
             };
 
             this.stateManager.setProjectA(project);
+            this.layout.updateProjectName(project.name);
 
             // Hide drop zone
             if (this.dropZone) {
@@ -261,9 +312,25 @@ export class App {
                 `Spine ${versionInfo.fullVersion || versionInfo.detected}`
             );
 
+            // Compute which atlas regions are referenced by skins
+            const usedRegionNames = new Set<string>();
+            const spineData = this.spineManager.spineData as any;
+            if (spineData?.skins) {
+                for (const skin of spineData.skins) {
+                    const attachments = typeof skin.getAttachments === 'function' ? skin.getAttachments() : [];
+                    for (const entry of attachments) {
+                        const att = entry.attachment;
+                        if (att) {
+                            const regionPath = att.path || att.name;
+                            if (regionPath) usedRegionNames.add(regionPath);
+                        }
+                    }
+                }
+            }
+
             // Emit atlas data for atlas inspector
             const parsedAtlas = parseAtlasText(fileSet.atlas.data);
-            eventBus.emit('atlas:loaded', { atlas: parsedAtlas, textures: fileSet.textures });
+            eventBus.emit('atlas:loaded', { atlas: parsedAtlas, textures: fileSet.textures, usedRegionNames });
 
             this.showToast(`Loaded: ${fileSet.skeleton.name}`, 'success');
 
@@ -277,6 +344,14 @@ export class App {
         // FPS
         this.layout.updateFPS(Math.round(this.viewport.ticker.FPS));
 
+        if (this.stateManager.mode === 'comparison') {
+            const projects = this.comparisonPanel.getProjects();
+            this.layout.updateTrackInfo(`Compare: ${projects.length} project${projects.length !== 1 ? 's' : ''}`);
+            this.layout.updateProgress(0);
+            this.layout.updateAnimTime('');
+            return;
+        }
+
         // Track info
         const trackInfo = this.spineManager.getCurrentTrackInfo(
             this.stateManager.projectA?.currentTrack ?? 0
@@ -285,10 +360,14 @@ export class App {
             this.layout.updateTrackInfo(
                 `Track ${this.stateManager.projectA?.currentTrack ?? 0}: ${trackInfo.name} ${trackInfo.loop ? '(loop)' : ''}`
             );
-            this.layout.updateProgress(trackInfo.time / trackInfo.duration);
+            this.layout.updateProgress(trackInfo.duration > 0 ? trackInfo.time / trackInfo.duration : 0);
             this.layout.updateAnimTime(
                 `${trackInfo.time.toFixed(2)}s / ${trackInfo.duration.toFixed(2)}s`
             );
+        } else {
+            this.layout.updateTrackInfo(this.stateManager.projectA ? 'No animation' : 'No project loaded');
+            this.layout.updateProgress(0);
+            this.layout.updateAnimTime('');
         }
     }
 

@@ -46,8 +46,8 @@ export function parseAtlasText(atlasText: string): ParsedAtlas {
             continue;
         }
 
-        // Check if this is a page header (no leading whitespace and no colon, or has size/format next)
-        if (!lines[i - 1].startsWith(' ') && !lines[i - 1].startsWith('\t')) {
+        // Check if this is a page header or region name (no leading whitespace, no colon in line itself)
+        if (!lines[i - 1].startsWith(' ') && !lines[i - 1].startsWith('\t') && !line.includes(':')) {
             // Look ahead: if next line has "size:" or "format:", this is a page name
             const nextLine = i < lines.length ? lines[i].trim() : '';
             if (nextLine.startsWith('size:') || nextLine.startsWith('format:') || nextLine.startsWith('filter:')) {
