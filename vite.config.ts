@@ -12,4 +12,8 @@ export default defineConfig({
         outDir: 'dist',
         sourcemap: true,
     },
+    server: {
+        host: '0.0.0.0', // accessible on LAN for QA team
+        port: 5173,
+    },
 });
