@@ -1,12 +1,21 @@
 import { eventBus } from '../../core/EventBus';
 import type { SpineEventData } from '../../core/SpineManager';
 
+interface CompareProjectRef {
+    name: string;
+}
+
 export class EventDebugPanel {
     element: HTMLElement;
     private typeFilters: Map<string, boolean> = new Map();
     private nameFilters: Map<string, boolean> = new Map();
     private nameFilterEl!: HTMLElement;
     private toastContainer: HTMLElement | null = null;
+
+    private compareProjects: CompareProjectRef[] = [];
+    private selectedProjects: Set<string> = new Set();
+    private isCompareMode = false;
+    private projectFilterEl!: HTMLElement;
 
     constructor() {
         this.element = document.createElement('div');
@@ -17,6 +26,16 @@ export class EventDebugPanel {
 
         eventBus.on('spine:event', (data: SpineEventData) => this.onSpineEvent(data));
         eventBus.on('project:change', () => { this.nameFilters.clear(); this.renderNameFilters(); });
+        eventBus.on('mode:change', (mode: string) => {
+            this.isCompareMode = mode === 'comparison';
+            this.projectFilterEl.style.display = this.isCompareMode ? 'block' : 'none';
+        });
+        eventBus.on('comparison:projects-changed', (projects: CompareProjectRef[]) => {
+            this.compareProjects = projects;
+            // Add any new projects to selected set by default
+            projects.forEach(p => this.selectedProjects.add(p.name));
+            this.renderProjectFilters();
+        });
     }
 
     private build(): void {
@@ -89,6 +108,56 @@ export class EventDebugPanel {
         this.nameFilterEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
         this.element.appendChild(this.nameFilterEl);
         this.renderNameFilters();
+
+        // ── Compare mode project filters (hidden in single mode) ──
+        this.projectFilterEl = document.createElement('div');
+        this.projectFilterEl.style.display = 'none';
+        this.projectFilterEl.style.paddingTop = '12px';
+
+        const projectFilterLabel = document.createElement('div');
+        projectFilterLabel.style.cssText = 'font-size:10px;color:var(--sv-text-muted);font-weight:600;letter-spacing:0.4px;padding:0 0 4px';
+        projectFilterLabel.textContent = 'PROJECT FILTER';
+        this.projectFilterEl.appendChild(projectFilterLabel);
+
+        const projectFilterBtns = document.createElement('div');
+        projectFilterBtns.className = 'sv-project-filter-btns';
+        projectFilterBtns.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
+        this.projectFilterEl.appendChild(projectFilterBtns);
+        this.element.appendChild(this.projectFilterEl);
+    }
+
+    private renderProjectFilters(): void {
+        const btnsEl = this.projectFilterEl.querySelector('.sv-project-filter-btns') as HTMLElement;
+        if (!btnsEl) return;
+        btnsEl.innerHTML = '';
+
+        if (this.compareProjects.length === 0) {
+            const empty = document.createElement('span');
+            empty.style.cssText = 'font-size:10px;color:var(--sv-text-muted)';
+            empty.textContent = 'No comparison projects loaded';
+            btnsEl.appendChild(empty);
+            return;
+        }
+
+        this.compareProjects.forEach(p => {
+            const enabled = this.selectedProjects.has(p.name);
+            const btn = document.createElement('button');
+            btn.className = 'sv-btn sv-btn-sm';
+            btn.textContent = p.name;
+            btn.style.cssText = 'font-size:10px;padding:1px 6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+            btn.style.opacity = enabled ? '1' : '0.35';
+            btn.title = p.name;
+            btn.addEventListener('click', () => {
+                if (this.selectedProjects.has(p.name)) {
+                    this.selectedProjects.delete(p.name);
+                    btn.style.opacity = '0.35';
+                } else {
+                    this.selectedProjects.add(p.name);
+                    btn.style.opacity = '1';
+                }
+            });
+            btnsEl.appendChild(btn);
+        });
     }
 
     private renderNameFilters(): void {
@@ -116,6 +185,9 @@ export class EventDebugPanel {
     }
 
     private onSpineEvent(data: SpineEventData): void {
+        // In compare mode, filter by selected projects
+        if (this.isCompareMode && data.projectName && !this.selectedProjects.has(data.projectName)) return;
+
         // Register custom event names
         if (data.type === 'event' && data.eventName) {
             if (!this.nameFilters.has(data.eventName)) {
@@ -136,10 +208,13 @@ export class EventDebugPanel {
             end: 'rgba(100,100,100,0.8)', interrupt: 'rgba(192,138,48,0.85)',
             dispose: 'rgba(192,80,80,0.85)', event: 'rgba(154,74,181,0.85)',
         };
-        this.showCanvasToast(label, colors[data.type] ?? 'rgba(60,60,60,0.85)', `T${data.trackIndex}`);
+
+        const trackBadge = `T${data.trackIndex}`;
+        const projectBadge = this.isCompareMode && data.projectName ? data.projectName : undefined;
+        this.showCanvasToast(label, colors[data.type] ?? 'rgba(60,60,60,0.85)', trackBadge, projectBadge);
     }
 
-    private showCanvasToast(text: string, bg: string, badge?: string): void {
+    private showCanvasToast(text: string, bg: string, badge?: string, projectBadge?: string): void {
         const viewport = document.querySelector('.sv-viewport');
         if (!viewport) return;
 
@@ -152,6 +227,12 @@ export class EventDebugPanel {
         const toast = document.createElement('div');
         toast.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 12px;border-radius:12px;background:${bg};color:#fff;font-size:12px;font-family:monospace;white-space:nowrap`;
 
+        if (projectBadge) {
+            const pb = document.createElement('span');
+            pb.style.cssText = 'font-size:10px;opacity:0.8;max-width:80px;overflow:hidden;text-overflow:ellipsis;border-right:1px solid rgba(255,255,255,0.4);padding-right:6px';
+            pb.textContent = projectBadge;
+            toast.appendChild(pb);
+        }
         if (badge) {
             const b = document.createElement('span');
             b.style.cssText = 'font-size:10px;opacity:0.7';

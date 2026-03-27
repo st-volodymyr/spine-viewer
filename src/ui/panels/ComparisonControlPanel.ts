@@ -111,6 +111,11 @@ export class ComparisonControlPanel {
         const projects = this.comparisonPanel.getProjects();
         this.refreshAnimations(projects);
         this.refreshSkins(projects);
+
+        // Sync speed slider to first project's current speed
+        const speed = projects[0]?.manager.getSpeed() ?? 1;
+        this.speedSlider.value = String(speed);
+        this.speedValue.textContent = `${speed.toFixed(1)}x`;
     }
 
     private refreshAnimations(projects: ComparisonProject[]): void {
@@ -143,6 +148,15 @@ export class ComparisonControlPanel {
             shared.forEach(name => {
                 const row = this.createAnimRow(name, projects, 'shared');
                 this.animListEl.appendChild(row);
+            });
+        }
+
+        // Mark currently-playing animation as active
+        const currentAnim = projects[0]?.manager.getCurrentTrackInfo(0)?.name;
+        if (currentAnim) {
+            this.animListEl.querySelectorAll('.sv-compare-anim-row').forEach(r => {
+                const nameSpan = r.querySelector('.sv-compare-anim-name');
+                if (nameSpan?.textContent === currentAnim) r.classList.add('active');
             });
         }
 
@@ -214,6 +228,7 @@ export class ComparisonControlPanel {
             const isShared = shared.includes(name);
             const row = document.createElement('div');
             row.className = 'sv-compare-skin-row';
+            row.dataset.skin = name;
             row.addEventListener('click', () => {
                 this.comparisonPanel.setSkin(name);
                 this.skinListEl.querySelectorAll('.sv-compare-skin-row').forEach(r =>
@@ -232,5 +247,13 @@ export class ComparisonControlPanel {
 
             this.skinListEl.appendChild(row);
         });
+
+        // Mark active skin
+        const currentSkin = projects[0]?.manager.getCurrentSkin();
+        if (currentSkin) {
+            this.skinListEl.querySelectorAll<HTMLElement>('.sv-compare-skin-row').forEach(r => {
+                if (r.dataset.skin === currentSkin) r.classList.add('active');
+            });
+        }
     }
 }

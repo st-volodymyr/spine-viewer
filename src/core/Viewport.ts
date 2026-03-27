@@ -100,7 +100,7 @@ export class Viewport {
 
         const { width, height } = this.app.screen;
         const gridSize = 50;
-        const gridColor = 0x999999;
+        const gridColor = 0x808080;
         const gridAlpha = 0.15;
 
         this.gridGraphics.lineStyle(1, gridColor, gridAlpha);

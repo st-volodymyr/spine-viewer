@@ -11,6 +11,7 @@ export interface SpineEventData {
     animationName: string;
     eventName?: string;
     time: number;
+    projectName?: string;
 }
 
 type AnySpine = SpineElement | Spine41;
@@ -21,6 +22,7 @@ function isSpineElement(s: AnySpine): s is SpineElement {
 
 export class SpineManager {
     spine: AnySpine | null = null;
+    displayName = '';
     private viewport: Viewport;
     private projectName: string = '';
     private listener: AnimationStateListener | null = null;
@@ -58,6 +60,7 @@ export class SpineManager {
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
                     time: entry.trackTime,
+                    projectName: this.displayName || undefined,
                 } as SpineEventData);
             },
             complete: (entry: TrackEntry) => {
@@ -66,6 +69,7 @@ export class SpineManager {
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
                     time: entry.trackTime,
+                    projectName: this.displayName || undefined,
                 } as SpineEventData);
             },
             end: (entry: TrackEntry) => {
@@ -74,6 +78,7 @@ export class SpineManager {
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
                     time: entry.trackTime,
+                    projectName: this.displayName || undefined,
                 } as SpineEventData);
             },
             interrupt: (entry: TrackEntry) => {
@@ -82,6 +87,7 @@ export class SpineManager {
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
                     time: entry.trackTime,
+                    projectName: this.displayName || undefined,
                 } as SpineEventData);
             },
             dispose: (entry: TrackEntry) => {
@@ -90,6 +96,7 @@ export class SpineManager {
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
                     time: entry.trackTime,
+                    projectName: this.displayName || undefined,
                 } as SpineEventData);
             },
             event: (entry: TrackEntry, event: any) => {
@@ -99,6 +106,7 @@ export class SpineManager {
                     animationName: entry.animation?.name ?? '',
                     eventName: event.data?.name ?? '',
                     time: entry.trackTime,
+                    projectName: this.displayName || undefined,
                 } as SpineEventData);
             },
         };
@@ -210,10 +218,21 @@ export class SpineManager {
         (this.spine.state as any).setEmptyAnimation(trackIndex, 0);
     }
 
+    seekTo(trackIndex: number, time: number): void {
+        if (!this.spine) return;
+        const current = (this.spine.state as any).getCurrent(trackIndex);
+        if (current) current.trackTime = time;
+    }
+
     setTrackLoop(trackIndex: number, loop: boolean): void {
         if (!this.spine) return;
         const current = (this.spine.state as any).getCurrent(trackIndex);
         if (current) current.loop = loop;
+    }
+
+    getCurrentSkin(): string | null {
+        if (!this.spine) return null;
+        return (this.spine.skeleton.skin as any)?.name ?? null;
     }
 
     getCurrentTrackInfo(trackIndex: number): { name: string; time: number; duration: number; loop: boolean } | null {

@@ -1,5 +1,5 @@
 import type { SpineManager } from '../core/SpineManager';
-import type { ComparisonDiff } from '../types/state';
+import type { ComparisonDiff, StructuredDiff, AnimationDiffEntry } from '../types/state';
 
 export class ComparisonEngine {
     private managers: SpineManager[] = [];
@@ -56,6 +56,8 @@ export class ComparisonEngine {
         const slotsB = new Set(mgrB.getSlotNames());
         const bonesA = new Set(mgrA.getBoneNames());
         const bonesB = new Set(mgrB.getBoneNames());
+        const eventsA = new Set(mgrA.getEventNames());
+        const eventsB = new Set(mgrB.getEventNames());
 
         return {
             animationsOnlyA: [...animsA].filter(a => !animsB.has(a)),
@@ -68,6 +70,75 @@ export class ComparisonEngine {
             slotsOnlyB: [...slotsB].filter(s => !slotsA.has(s)),
             bonesOnlyA: [...bonesA].filter(b => !bonesB.has(b)),
             bonesOnlyB: [...bonesB].filter(b => !bonesA.has(b)),
+            eventsOnlyA: [...eventsA].filter(e => !eventsB.has(e)),
+            eventsOnlyB: [...eventsB].filter(e => !eventsA.has(e)),
+            eventsShared: [...eventsA].filter(e => eventsB.has(e)),
+        };
+    }
+
+    getStructuredDiff(idxA: number, idxB: number): StructuredDiff {
+        const mgrA = this.managers[idxA];
+        const mgrB = this.managers[idxB];
+        if (!mgrA || !mgrB) {
+            return emptyStructuredDiff();
+        }
+
+        const diff = this.getDiff(idxA, idxB);
+        const animations: AnimationDiffEntry[] = [];
+
+        for (const name of diff.animationsShared) {
+            animations.push({
+                name,
+                status: 'shared',
+                durationA: mgrA.getAnimationDuration(name) ?? undefined,
+                durationB: mgrB.getAnimationDuration(name) ?? undefined,
+            });
+        }
+        for (const name of diff.animationsOnlyA) {
+            animations.push({
+                name,
+                status: 'only-a',
+                durationA: mgrA.getAnimationDuration(name) ?? undefined,
+            });
+        }
+        for (const name of diff.animationsOnlyB) {
+            animations.push({
+                name,
+                status: 'only-b',
+                durationB: mgrB.getAnimationDuration(name) ?? undefined,
+            });
+        }
+
+        animations.sort((a, b) => {
+            const order = { 'shared': 0, 'only-a': 1, 'only-b': 2 };
+            return order[a.status] - order[b.status] || a.name.localeCompare(b.name);
+        });
+
+        return {
+            animations,
+            summary: {
+                bonesA: mgrA.getBoneNames().length,
+                bonesB: mgrB.getBoneNames().length,
+                slotsA: mgrA.getSlotNames().length,
+                slotsB: mgrB.getSlotNames().length,
+                skinsA: mgrA.getSkinNames().length,
+                skinsB: mgrB.getSkinNames().length,
+                eventsA: mgrA.getEventNames().length,
+                eventsB: mgrB.getEventNames().length,
+                animsShared: diff.animationsShared.length,
+                animsOnlyA: diff.animationsOnlyA.length,
+                animsOnlyB: diff.animationsOnlyB.length,
+            },
+            skinsOnlyA: diff.skinsOnlyA,
+            skinsOnlyB: diff.skinsOnlyB,
+            skinsShared: diff.skinsShared,
+            bonesOnlyA: diff.bonesOnlyA,
+            bonesOnlyB: diff.bonesOnlyB,
+            slotsOnlyA: diff.slotsOnlyA,
+            slotsOnlyB: diff.slotsOnlyB,
+            eventsOnlyA: diff.eventsOnlyA,
+            eventsOnlyB: diff.eventsOnlyB,
+            eventsShared: diff.eventsShared,
         };
     }
 
@@ -98,5 +169,21 @@ function emptyDiff(): ComparisonDiff {
         skinsOnlyA: [], skinsOnlyB: [], skinsShared: [],
         slotsOnlyA: [], slotsOnlyB: [],
         bonesOnlyA: [], bonesOnlyB: [],
+        eventsOnlyA: [], eventsOnlyB: [], eventsShared: [],
+    };
+}
+
+function emptyStructuredDiff(): StructuredDiff {
+    return {
+        animations: [],
+        summary: {
+            bonesA: 0, bonesB: 0, slotsA: 0, slotsB: 0,
+            skinsA: 0, skinsB: 0, eventsA: 0, eventsB: 0,
+            animsShared: 0, animsOnlyA: 0, animsOnlyB: 0,
+        },
+        skinsOnlyA: [], skinsOnlyB: [], skinsShared: [],
+        bonesOnlyA: [], bonesOnlyB: [],
+        slotsOnlyA: [], slotsOnlyB: [],
+        eventsOnlyA: [], eventsOnlyB: [], eventsShared: [],
     };
 }

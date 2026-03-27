@@ -1,5 +1,7 @@
+import { eventBus } from '../../core/EventBus';
 import type { Viewport } from '../../core/Viewport';
 import type { SpineManager } from '../../core/SpineManager';
+import type { ComparisonPanel } from '../panels/ComparisonPanel';
 
 const WARN_BONES = 200;
 const WARN_SLOTS = 300;
@@ -9,6 +11,7 @@ export class PerformancePanel {
     private panel: HTMLElement;
     private visible = false;
     private fpsHistory: number[] = [];
+    private isCompareMode = false;
 
     private fpsEl!: HTMLElement;
     private avgEl!: HTMLElement;
@@ -22,11 +25,16 @@ export class PerformancePanel {
     private vramEl!: HTMLElement;
     private warningsEl!: HTMLElement;
     private chart!: HTMLElement;
+    private skeletonSection!: HTMLElement;
 
-    constructor(private viewport: Viewport, private spineManager: SpineManager) {
+    constructor(private viewport: Viewport, private spineManager: SpineManager, private comparisonPanel: ComparisonPanel | null = null) {
         this.panel = this.buildPanel();
         document.body.appendChild(this.panel);
         viewport.ticker.add(() => this.tick());
+
+        eventBus.on('mode:change', (mode: string) => {
+            this.isCompareMode = mode === 'comparison';
+        });
     }
 
     private buildPanel(): HTMLElement {
@@ -68,10 +76,11 @@ export class PerformancePanel {
             this.drawCallsEl = this.addRow(grid, 'Draw calls');
         }));
 
-        panel.appendChild(this.buildSection('SKELETON', (grid) => {
+        this.skeletonSection = this.buildSection('SKELETON', (grid) => {
             this.bonesEl = this.addRow(grid, 'Bones');
             this.slotsEl = this.addRow(grid, 'Slots');
-        }));
+        });
+        panel.appendChild(this.skeletonSection);
 
         panel.appendChild(this.buildSection('MEMORY', (grid) => {
             this.jsHeapEl = this.addRow(grid, 'JS Heap');
@@ -153,16 +162,59 @@ export class PerformancePanel {
         this.drawCallsEl.textContent = drawCalls !== null ? String(drawCalls) : '\u2014';
 
         // Skeleton info
-        const spine = this.spineManager.spine;
         let bones = 0, slots = 0;
-        if (spine) {
-            bones = spine.skeleton.bones.length;
-            slots = spine.skeleton.slots.length;
+        if (this.isCompareMode && this.comparisonPanel) {
+            const projects = this.comparisonPanel.getProjects();
+            const grid = this.skeletonSection.querySelector('div:last-child') as HTMLElement;
+            // Rebuild grid structure only when project count changes
+            const expectedChildren = projects.length * 2;
+            const firstLabel = grid.children.length > 0 ? (grid.children[0] as HTMLElement).textContent ?? '' : '';
+            const expectedFirstLabel = projects[0]?.name ?? '';
+            if (grid.children.length !== expectedChildren || firstLabel !== expectedFirstLabel) {
+                grid.innerHTML = '';
+                projects.forEach(p => {
+                    const lbl = document.createElement('span');
+                    lbl.style.cssText = 'color:var(--sv-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                    lbl.textContent = p.name;
+                    grid.appendChild(lbl);
+                    const val = document.createElement('span');
+                    val.style.fontFamily = 'var(--sv-font-mono)';
+                    val.style.fontWeight = '600';
+                    grid.appendChild(val);
+                });
+            }
+            projects.forEach((p, i) => {
+                const s = p.manager.spine;
+                const b = s ? s.skeleton.bones.length : 0;
+                const sl = s ? s.skeleton.slots.length : 0;
+                bones += b;
+                slots += sl;
+                const val = grid.children[i * 2 + 1] as HTMLElement;
+                if (val) {
+                    val.textContent = `${b}b / ${sl}sl`;
+                    val.style.color = (b > WARN_BONES || sl > WARN_SLOTS) ? '#c08a30' : '';
+                }
+            });
+            this.bonesEl.textContent = String(bones);
+            this.slotsEl.textContent = String(slots);
+        } else {
+            const spine = this.spineManager.spine;
+            if (spine) {
+                bones = spine.skeleton.bones.length;
+                slots = spine.skeleton.slots.length;
+            }
+            // Rebuild skeleton section back to standard layout if coming from compare mode
+            const grid = this.skeletonSection.querySelector('div:last-child') as HTMLElement;
+            if (grid.children.length !== 4 || (grid.children[0] as HTMLElement).textContent !== 'Bones') {
+                grid.innerHTML = '';
+                this.bonesEl = this.addRow(grid, 'Bones');
+                this.slotsEl = this.addRow(grid, 'Slots');
+            }
+            this.bonesEl.textContent = bones > 0 ? String(bones) : '\u2014';
+            this.bonesEl.style.color = bones > WARN_BONES ? '#c08a30' : '';
+            this.slotsEl.textContent = slots > 0 ? String(slots) : '\u2014';
+            this.slotsEl.style.color = slots > WARN_SLOTS ? '#c08a30' : '';
         }
-        this.bonesEl.textContent = bones > 0 ? String(bones) : '\u2014';
-        this.bonesEl.style.color = bones > WARN_BONES ? '#c08a30' : '';
-        this.slotsEl.textContent = slots > 0 ? String(slots) : '\u2014';
-        this.slotsEl.style.color = slots > WARN_SLOTS ? '#c08a30' : '';
 
         // JS Heap
         const mem = (performance as any).memory;

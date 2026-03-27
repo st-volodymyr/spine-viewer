@@ -11,15 +11,6 @@ interface EventTrigger {
     loop: boolean;
 }
 
-interface ActiveTrackRow {
-    row: HTMLElement;
-    nameEl: HTMLElement;
-    progressFill: HTMLElement;
-    timeEl: HTMLElement;
-    loopBtn: HTMLButtonElement;
-    animSelect: HTMLSelectElement;
-}
-
 export class QuickAccessPanel {
     element: HTMLElement;
 
@@ -49,11 +40,6 @@ export class QuickAccessPanel {
     private queueListEl!: HTMLElement;
     private queue: string[] = [];
 
-    // Active tracks - stable DOM
-    private trackStatusEl!: HTMLElement;
-    private activeTrackRows = new Map<number, ActiveTrackRow>();
-    private statusInterval: ReturnType<typeof setInterval> | null = null;
-
     // Event triggers
     private triggers: EventTrigger[] = [];
     private triggerIdCounter = 0;
@@ -77,17 +63,7 @@ export class QuickAccessPanel {
             this.isPaused = false;
             this.queue = [];
             this.triggers = [];
-            for (const [, rowData] of this.activeTrackRows) {
-                rowData.row.remove();
-            }
-            this.activeTrackRows.clear();
-            if (this.trackStatusEl) {
-                this.trackStatusEl.innerHTML = '';
-                this.trackStatusEl.textContent = 'No animations playing';
-                this.trackStatusEl.style.display = 'block';
-            }
             this.refresh();
-            this.startStatusUpdates();
         });
 
         eventBus.on('spine:event', (data: SpineEventData) => {
@@ -137,7 +113,7 @@ export class QuickAccessPanel {
         trackRow.style.cssText = 'padding:4px 8px 2px;display:flex;flex-wrap:wrap;gap:3px;align-items:center';
 
         const trackLbl = document.createElement('span');
-        trackLbl.style.cssText = 'font-size:10px;color:var(--sv-text-muted);margin-right:2px';
+        trackLbl.style.cssText = 'font-size:var(--sv-font-size-sm);color:var(--sv-text-muted);margin-right:2px';
         trackLbl.textContent = 'Track:';
         trackRow.appendChild(trackLbl);
 
@@ -145,7 +121,7 @@ export class QuickAccessPanel {
             const pill = document.createElement('button');
             pill.className = 'sv-btn sv-btn-sm';
             pill.textContent = String(i);
-            pill.style.cssText = 'padding:0 5px;min-width:20px;height:18px;font-size:10px;font-family:var(--sv-font-mono)';
+            pill.style.cssText = 'padding:0 6px;min-width:22px;height:22px;font-size:var(--sv-font-size-sm);font-family:var(--sv-font-mono)';
             const trackIndex = i;
             pill.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -283,16 +259,6 @@ export class QuickAccessPanel {
             body.appendChild(resetBtn);
         });
         this.element.appendChild(playSection);
-
-        // ── ACTIVE TRACKS ─────────────────────────────────────────────
-        const tracksSection = this.makeSection('ACTIVE TRACKS', (body) => {
-            this.trackStatusEl = document.createElement('div');
-            this.trackStatusEl.style.fontSize = 'var(--sv-font-size-sm)';
-            this.trackStatusEl.style.color = 'var(--sv-text-muted)';
-            this.trackStatusEl.textContent = 'No animations playing';
-            body.appendChild(this.trackStatusEl);
-        });
-        this.element.appendChild(tracksSection);
 
         // ── ANIMATION QUEUE ───────────────────────────────────────────
         const queueSection = this.makeSection('ANIMATION QUEUE', (body) => {
@@ -578,143 +544,19 @@ export class QuickAccessPanel {
         });
     }
 
-    private startStatusUpdates(): void {
-        if (this.statusInterval !== null) clearInterval(this.statusInterval);
-        this.statusInterval = setInterval(() => this.updateTrackStatus(), 250);
-    }
-
-    private updateTrackStatus(): void {
-        if (!this.trackStatusEl) return;
-        const tracks = this.spineManager.getAllActiveTracks();
-        const activeIndices = new Set(tracks.map(t => t.trackIndex));
-
-        // Remove rows for stopped tracks
-        for (const [idx, rowData] of this.activeTrackRows) {
-            if (!activeIndices.has(idx)) {
-                rowData.row.remove();
-                this.activeTrackRows.delete(idx);
-            }
-        }
-
-        if (tracks.length === 0) {
-            this.trackStatusEl.style.display = 'block';
-            this.trackStatusEl.textContent = 'No animations playing';
-        } else {
-            this.trackStatusEl.style.display = 'none';
-            for (const t of tracks) {
-                const pct = t.duration > 0 ? Math.min(100, (t.time / t.duration) * 100) : 0;
-                if (this.activeTrackRows.has(t.trackIndex)) {
-                    const r = this.activeTrackRows.get(t.trackIndex)!;
-                    r.progressFill.style.width = `${pct}%`;
-                    r.timeEl.textContent = t.loop ? '\u221E' : `${t.time.toFixed(1)}s`;
-                    r.loopBtn.textContent = t.loop ? '\u221E' : '1\u00D7';
-                    r.loopBtn.title = t.loop ? 'Looping (click to play once)' : 'Playing once (click to loop)';
-                    if (r.animSelect.value !== t.name) {
-                        r.animSelect.value = t.name;
-                    }
-                } else {
-                    this.addActiveTrackRow(t, pct);
-                }
-            }
-        }
-
-        this.updateTrackPills();
-    }
-
-    private addActiveTrackRow(t: { trackIndex: number; name: string; time: number; duration: number; loop: boolean }, pct: number): void {
-        const project = this.stateManager.projectA;
-        const animNames = project?.animationNames ?? [];
-
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:4px;padding:3px 0;border-bottom:1px solid var(--sv-border-light)';
-
-        // Track badge
-        const badge = document.createElement('span');
-        badge.className = 'sv-tree-badge';
-        badge.textContent = `T${t.trackIndex}`;
-        badge.style.flexShrink = '0';
-        row.appendChild(badge);
-
-        // Loop toggle button
-        const loopBtn = document.createElement('button');
-        loopBtn.className = 'sv-btn sv-btn-sm';
-        loopBtn.style.cssText = 'padding:0 4px;min-width:22px;font-size:10px;flex-shrink:0';
-        loopBtn.textContent = t.loop ? '\u221E' : '1\u00D7';
-        loopBtn.title = t.loop ? 'Looping (click to play once)' : 'Playing once (click to loop)';
-        loopBtn.addEventListener('click', () => {
-            const current = (this.spineManager.spine?.state as any)?.getCurrent(t.trackIndex);
-            if (current) {
-                const newLoop = !current.loop;
-                this.spineManager.setTrackLoop(t.trackIndex, newLoop);
-                loopBtn.textContent = newLoop ? '\u221E' : '1\u00D7';
-                loopBtn.title = newLoop ? 'Looping (click to play once)' : 'Playing once (click to loop)';
-            }
-        });
-        row.appendChild(loopBtn);
-
-        // Animation select
-        const animSelect = document.createElement('select');
-        animSelect.className = 'sv-select';
-        animSelect.style.cssText = 'flex:1;font-size:10px;height:20px;padding:0 2px';
-        animNames.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            animSelect.appendChild(opt);
-        });
-        animSelect.value = t.name;
-        animSelect.addEventListener('change', () => {
-            const current = (this.spineManager.spine?.state as any)?.getCurrent(t.trackIndex);
-            const loop = current?.loop ?? true;
-            this.spineManager.setAnimation(t.trackIndex, animSelect.value, loop);
-        });
-        row.appendChild(animSelect);
-
-        // Progress mini bar
-        const prog = document.createElement('div');
-        prog.style.cssText = 'width:32px;height:3px;background:var(--sv-border);border-radius:2px;flex-shrink:0';
-        const fill = document.createElement('div');
-        fill.style.cssText = `width:${pct}%;height:100%;background:var(--sv-accent);border-radius:2px`;
-        prog.appendChild(fill);
-        row.appendChild(prog);
-
-        const timeEl = document.createElement('span');
-        timeEl.style.cssText = 'font-size:10px;color:var(--sv-text-muted);min-width:28px;text-align:right;flex-shrink:0';
-        timeEl.textContent = t.loop ? '\u221E' : `${t.time.toFixed(1)}s`;
-        row.appendChild(timeEl);
-
-        // Stop button
-        const stopBtn = document.createElement('button');
-        stopBtn.className = 'sv-btn sv-btn-sm';
-        stopBtn.style.cssText = 'padding:0 4px;min-width:18px;flex-shrink:0';
-        stopBtn.textContent = '\u25A0';
-        stopBtn.title = `Stop track ${t.trackIndex}`;
-        stopBtn.addEventListener('click', () => {
-            this.spineManager.clearTrack(t.trackIndex);
-            if (t.trackIndex === this.currentTrack) {
-                this.currentAnim = '';
-                this.refresh();
-            }
-        });
-        row.appendChild(stopBtn);
-
-        this.trackStatusEl.parentElement!.appendChild(row);
-        this.activeTrackRows.set(t.trackIndex, { row, nameEl: animSelect as any, progressFill: fill, timeEl, loopBtn, animSelect });
-    }
-
     private renderItem(container: HTMLElement, name: string, isActive: boolean, onSelect: () => void): void {
         const row = document.createElement('div');
         row.style.display = 'flex';
         row.style.alignItems = 'center';
-        row.style.padding = '4px 10px';
-        row.style.gap = '6px';
+        row.style.padding = '5px 10px';
+        row.style.gap = '8px';
         row.style.cursor = 'pointer';
         row.style.background = isActive ? 'var(--sv-accent)' : 'transparent';
         row.style.color = isActive ? '#fff' : 'var(--sv-text-primary)';
-        row.style.fontSize = 'var(--sv-font-size-sm)';
+        row.style.fontSize = 'var(--sv-font-size)';
 
         const dot = document.createElement('span');
-        dot.style.cssText = `width:6px;height:6px;border-radius:50%;flex-shrink:0;border:1px solid ${isActive ? 'rgba(255,255,255,0.7)' : 'var(--sv-text-muted)'};background:${isActive ? 'rgba(255,255,255,0.9)' : 'transparent'}`;
+        dot.style.cssText = `width:7px;height:7px;border-radius:50%;flex-shrink:0;border:1px solid ${isActive ? 'rgba(255,255,255,0.7)' : 'var(--sv-text-muted)'};background:${isActive ? 'rgba(255,255,255,0.9)' : 'transparent'}`;
         row.appendChild(dot);
 
         const nameEl = document.createElement('span');
@@ -728,7 +570,7 @@ export class QuickAccessPanel {
 
         const copyBtn = document.createElement('button');
         copyBtn.className = 'sv-btn sv-btn-sm';
-        copyBtn.style.cssText = 'padding:0 4px;min-width:18px;opacity:0;font-size:10px;flex-shrink:0';
+        copyBtn.style.cssText = 'padding:0 5px;min-width:22px;opacity:0;font-size:var(--sv-font-size-sm);flex-shrink:0';
         if (isActive) { copyBtn.style.background = 'rgba(255,255,255,0.2)'; copyBtn.style.border = '1px solid rgba(255,255,255,0.3)'; copyBtn.style.color = '#fff'; }
         copyBtn.textContent = '\u2398';
         copyBtn.title = 'Copy name';

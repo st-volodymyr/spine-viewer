@@ -29,6 +29,7 @@ export class App {
     private comparisonControlEl!: HTMLElement;
     private comparisonPanel!: ComparisonPanel;
     private wasPausedBeforeCompare = false;
+    private lastAtlasPayload: { atlas: any; textures: any; usedRegionNames: Set<string> } | null = null;
 
     constructor(container: HTMLElement) {
         this.stateManager = new StateManager();
@@ -45,36 +46,81 @@ export class App {
         this.buildPerformancePanel();
 
         // Event listeners
+        eventBus.on('comparison:projects-changed', () => {
+            if (this.stateManager.mode === 'comparison' && this.dropZone) {
+                if (this.comparisonPanel.getProjects().length > 0) {
+                    this.dropZone.style.display = 'none';
+                }
+            }
+        });
+
         eventBus.on('viewport:reset', () => {
             this.viewport.centerWrapper();
             this.viewport.wrapper.scale.set(1, 1);
             this.stateManager.setViewport({ zoom: 1 });
         });
 
-        // Mode switching: hide/show main spine, swap left panel, hide drop zone
+        // Mode switching: hide/show main spine, swap left panel, manage compare state
         eventBus.on('mode:change', (mode: string) => {
             if (mode === 'comparison') {
-                // Remember pause state and stop main spine
-                if (this.spineManager.spine) {
-                    this.wasPausedBeforeCompare = this.stateManager.projectA?.paused ?? false;
+                const projectA = this.stateManager.projectA;
+                if (projectA && this.spineManager.spine && this.comparisonPanel.getProjects().length === 0) {
+                    // Auto-borrow the single-mode project as comparison project 1
+                    this.comparisonPanel.initCompareStateFrom(this.spineManager, projectA.currentSkin);
+                    this.comparisonPanel.addBorrowedProject(projectA.name, this.spineManager);
+                    // Emit borrowed project's atlas so atlas inspector can display it in compare mode
+                    if (this.lastAtlasPayload) {
+                        eventBus.emit('atlas:loaded', { ...this.lastAtlasPayload, projectName: projectA.name });
+                    }
+                    // Spine stays visible and playing — compare panel now manages it
+                } else if (this.spineManager.spine) {
+                    // No single project loaded, or compare already has projects — hide main spine
+                    this.wasPausedBeforeCompare = projectA?.paused ?? false;
                     this.spineManager.setPaused(true);
                     this.spineManager.spine.visible = false;
                 }
-                // Hide drop zone in compare mode
+                // Drop zone: hide if projects loaded (borrowed counts), else show compare hint
                 if (this.dropZone) {
-                    this.dropZone.style.display = 'none';
+                    if (this.comparisonPanel.getProjects().length === 0) {
+                        const text = this.dropZone.querySelector('.sv-drop-zone-text');
+                        if (text) text.textContent = 'Drop spine files here to add a comparison project';
+                        this.dropZone.classList.remove('sv-hidden');
+                        this.dropZone.style.display = '';
+                    } else {
+                        this.dropZone.style.display = 'none';
+                    }
                 }
                 this.quickAccessEl.style.display = 'none';
                 this.comparisonControlEl.style.display = 'block';
             } else {
+                // Returning to single mode
+                const projects = this.comparisonPanel.getProjects();
+                const hasNonBorrowed = projects.some(p => !p.borrowed);
+
+                if (hasNonBorrowed) {
+                    // 2nd project was loaded — reset all compare state
+                    this.comparisonPanel.clearAllCompareProjects();
+                } else {
+                    // Only borrowed project (or none) — release it silently
+                    this.comparisonPanel.releaseBorrowedProjects();
+                }
+
                 // Restore main spine
                 if (this.spineManager.spine) {
                     this.spineManager.spine.visible = true;
-                    this.spineManager.setPaused(this.wasPausedBeforeCompare);
+                    this.spineManager.spine.x = 0;  // reset position set by compare layout
+                    if (hasNonBorrowed) {
+                        // Restore pause state that was active before compare
+                        this.spineManager.setPaused(this.wasPausedBeforeCompare);
+                    }
+                    // If only borrowed: spine was never paused by us, leave it as-is
                 }
-                // Restore drop zone visibility (only show if no project loaded)
+
+                // Restore drop zone
                 if (this.dropZone) {
-                    this.dropZone.style.display = '';
+                    const text = this.dropZone.querySelector('.sv-drop-zone-text');
+                    if (text) text.textContent = 'Drop spine files here or use the buttons above';
+                    this.dropZone.style.display = this.stateManager.projectA ? 'none' : '';
                 }
                 this.quickAccessEl.style.display = 'block';
                 this.comparisonControlEl.style.display = 'none';
@@ -200,7 +246,7 @@ export class App {
     }
 
     private buildPerformancePanel(): void {
-        const perfPanel = new PerformancePanel(this.viewport, this.spineManager);
+        const perfPanel = new PerformancePanel(this.viewport, this.spineManager, this.comparisonPanel);
         const perfBtn = document.getElementById('sv-perf-btn');
         if (perfBtn) perfBtn.addEventListener('click', () => perfPanel.toggle());
     }
@@ -254,6 +300,12 @@ export class App {
     }
 
     private async handleFiles(files: FileList): Promise<void> {
+        // In compare mode, route to comparison panel directly
+        if (this.stateManager.mode === 'comparison') {
+            await this.comparisonPanel.addProjectFromFiles(files);
+            return;
+        }
+
         try {
             this.showToast('Loading spine files...', 'info');
 
@@ -331,6 +383,7 @@ export class App {
             // Emit atlas data for atlas inspector
             const parsedAtlas = parseAtlasText(fileSet.atlas.data);
             eventBus.emit('atlas:loaded', { atlas: parsedAtlas, textures: fileSet.textures, usedRegionNames });
+            this.lastAtlasPayload = { atlas: parsedAtlas, textures: fileSet.textures, usedRegionNames };
 
             this.showToast(`Loaded: ${fileSet.skeleton.name}`, 'success');
 

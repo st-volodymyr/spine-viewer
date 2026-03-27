@@ -9,7 +9,7 @@ export class StateManager {
             zoom: 1,
             panX: 0,
             panY: 0,
-            bgColor: '#b0b0b0',
+            bgColor: '#c8c8c8',
             showGrid: true,
         },
         mode: 'single',

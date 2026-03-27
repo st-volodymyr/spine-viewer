@@ -8,17 +8,32 @@ import type { Container } from '@electricelephants/pixi-ext';
 interface PlaceholderEntry {
     slotName: string;
     marker: Graphics | null;
+    markerRafId: number | null;
     contentSprite: Sprite | null;
     contentText: Text | null;
     rafId: number | null;
     container: Container | null;
 }
 
+type Entries = Map<string, PlaceholderEntry>;
+
+interface CompareProjectRef {
+    name: string;
+    manager: SpineManager;
+}
+
 export class PlaceholderPanel {
     element: HTMLElement;
     private listEl!: HTMLElement;
     private showAllToggle!: HTMLInputElement;
-    private entries: Map<string, PlaceholderEntry> = new Map();
+
+    // Single-mode entries
+    private entries: Entries = new Map();
+
+    // Compare-mode: per-project entries, preserved across refreshes
+    private compareEntries: Map<SpineManager, Entries> = new Map();
+    private compareProjects: CompareProjectRef[] = [];
+    private isCompareMode = false;
 
     constructor(
         private stateManager: StateManager,
@@ -28,6 +43,29 @@ export class PlaceholderPanel {
         this.build();
 
         eventBus.on('project:change', () => this.refresh());
+        eventBus.on('mode:change', (mode: string) => {
+            this.isCompareMode = mode === 'comparison';
+            this.refresh();
+        });
+        eventBus.on('comparison:projects-changed', (projects: CompareProjectRef[]) => {
+            // Prune entries for removed projects
+            const managers = new Set(projects.map(p => p.manager));
+            for (const mgr of this.compareEntries.keys()) {
+                if (!managers.has(mgr)) {
+                    this.clearEntriesMap(this.compareEntries.get(mgr)!);
+                    this.compareEntries.delete(mgr);
+                }
+            }
+            this.compareProjects = projects;
+            if (this.isCompareMode) this.refresh();
+        });
+    }
+
+    private getProjectEntries(manager: SpineManager): Entries {
+        if (!this.compareEntries.has(manager)) {
+            this.compareEntries.set(manager, new Map());
+        }
+        return this.compareEntries.get(manager)!;
     }
 
     private build(): void {
@@ -65,57 +103,96 @@ export class PlaceholderPanel {
     }
 
     refresh(): void {
-        this.clearAll();
-        this.listEl.innerHTML = '';
-
-        const project = this.stateManager.projectA;
-        if (!project) return;
-
-        project.slotNames.forEach(slotName => {
-            this.buildSlotRow(slotName);
-        });
+        // In single mode: destroy all visuals and rebuild the list
+        // In compare mode: only rebuild DOM; keep compare entries (and their visuals) intact
+        if (this.isCompareMode) {
+            this.listEl.innerHTML = '';
+            if (this.compareProjects.length === 0) return;
+            this.compareProjects.forEach(project => {
+                const entries = this.getProjectEntries(project.manager);
+                this.buildProjectSection(project.name, project.manager, entries);
+            });
+            // Re-apply show-all for any newly added projects that don't have markers yet
+            if (this.showAllToggle.checked) this.toggleAll();
+        } else {
+            this.clearEntriesMap(this.entries);
+            this.entries = new Map();
+            this.listEl.innerHTML = '';
+            const slotNames = this.stateManager.projectA?.slotNames ?? [];
+            slotNames.forEach(slotName => this.buildSlotRow(slotName, this.spineManager, this.entries, this.listEl));
+        }
     }
 
-    private buildSlotRow(slotName: string): void {
+    private buildProjectSection(projectName: string, manager: SpineManager, entries: Entries): void {
+        const section = document.createElement('div');
+        section.style.marginBottom = '4px';
+
+        const header = document.createElement('div');
+        header.className = 'sv-section-header';
+        header.style.cssText = 'cursor:pointer;padding:4px 0;font-weight:600;font-size:var(--sv-font-size-sm);display:flex;align-items:center;gap:4px';
+        const arrow = document.createElement('span');
+        arrow.className = 'sv-section-arrow';
+        arrow.textContent = '▼';
+        header.appendChild(arrow);
+        const title = document.createElement('span');
+        title.textContent = projectName;
+        header.appendChild(title);
+
+        const body = document.createElement('div');
+        body.className = 'sv-section-body';
+
+        header.addEventListener('click', () => {
+            const collapsed = header.classList.toggle('collapsed');
+            body.style.display = collapsed ? 'none' : '';
+        });
+
+        section.appendChild(header);
+        section.appendChild(body);
+        this.listEl.appendChild(section);
+
+        const slotNames = manager.getSlotNames();
+        slotNames.forEach(slotName => this.buildSlotRow(slotName, manager, entries, body));
+    }
+
+    private buildSlotRow(slotName: string, manager: SpineManager, entries: Entries, container: HTMLElement): void {
         const wrapper = document.createElement('div');
         wrapper.style.borderBottom = '1px solid var(--sv-border-light)';
 
-        // Main row: name + toggle
         const mainRow = document.createElement('div');
         mainRow.className = 'sv-control-row';
         mainRow.style.padding = '2px 0';
 
-        const name = document.createElement('span');
-        name.style.flex = '1';
-        name.style.fontSize = 'var(--sv-font-size-sm)';
-        name.style.overflow = 'hidden';
-        name.style.textOverflow = 'ellipsis';
-        name.style.whiteSpace = 'nowrap';
-        name.title = slotName;
-        name.textContent = slotName;
-        mainRow.appendChild(name);
+        const nameEl = document.createElement('span');
+        nameEl.style.flex = '1';
+        nameEl.style.fontSize = 'var(--sv-font-size-sm)';
+        nameEl.style.overflow = 'hidden';
+        nameEl.style.textOverflow = 'ellipsis';
+        nameEl.style.whiteSpace = 'nowrap';
+        nameEl.title = slotName;
+        nameEl.textContent = slotName;
+        mainRow.appendChild(nameEl);
 
         const toggleLabel = document.createElement('label');
         toggleLabel.className = 'sv-toggle';
         toggleLabel.style.flexShrink = '0';
         const input = document.createElement('input');
         input.type = 'checkbox';
+        // Restore checked state if entry already has a marker
+        if (entries.get(slotName)?.marker) input.checked = true;
         const trackEl = document.createElement('span');
         trackEl.className = 'sv-toggle-track';
         toggleLabel.appendChild(input);
         toggleLabel.appendChild(trackEl);
         mainRow.appendChild(toggleLabel);
-
         wrapper.appendChild(mainRow);
 
-        // Content controls (hidden until toggled on)
         const contentRow = document.createElement('div');
-        contentRow.style.display = 'none';
+        contentRow.style.display = input.checked ? 'flex' : 'none';
         contentRow.style.flexDirection = 'column';
         contentRow.style.gap = '4px';
         contentRow.style.padding = '4px 0 6px 8px';
 
-        // Text row: text input + style dialog button + set button
+        // Text row
         const textRow = document.createElement('div');
         textRow.style.display = 'flex';
         textRow.style.gap = '4px';
@@ -133,30 +210,27 @@ export class PlaceholderPanel {
         textInput.style.fontSize = 'var(--sv-font-size-sm)';
         textRow.appendChild(textInput);
 
-        // Current text style for this slot
-        let slotTextStyle: { fontSize: number; fill: string; stroke: string; strokeThickness: number; fontFamily: string; fontWeight: string; fontStyle: string } = { fontSize: 14, fill: '#ffffff', stroke: '#000000', strokeThickness: 2, fontFamily: 'Arial', fontWeight: 'normal', fontStyle: 'normal' };
+        let slotTextStyle: { fontSize: number; fill: string; stroke: string; strokeThickness: number; fontFamily: string; fontWeight: string; fontStyle: string } = {
+            fontSize: 14, fill: '#ffffff', stroke: '#000000', strokeThickness: 2, fontFamily: 'Arial', fontWeight: 'normal', fontStyle: 'normal',
+        };
 
         const styleBtn = document.createElement('button');
         styleBtn.className = 'sv-btn sv-btn-sm';
         styleBtn.textContent = '\u{1F58B}';
         styleBtn.title = 'Text style options';
         styleBtn.addEventListener('click', () => {
-            this.openTextStyleDialog(slotTextStyle, (newStyle) => {
-                slotTextStyle = newStyle;
-            });
+            this.openTextStyleDialog(slotTextStyle, (newStyle) => { slotTextStyle = newStyle; });
         });
         textRow.appendChild(styleBtn);
 
         const setTextBtn = document.createElement('button');
         setTextBtn.className = 'sv-btn sv-btn-sm';
         setTextBtn.textContent = 'Set';
-        setTextBtn.addEventListener('click', () => {
-            this.setTextContent(slotName, textInput.value, slotTextStyle);
-        });
+        setTextBtn.addEventListener('click', () => this.setTextContentFor(slotName, textInput.value, slotTextStyle, manager, entries));
         textRow.appendChild(setTextBtn);
         contentRow.appendChild(textRow);
 
-        // Image upload row
+        // Image row
         const imgRow = document.createElement('div');
         imgRow.style.display = 'flex';
         imgRow.style.gap = '4px';
@@ -174,7 +248,7 @@ export class PlaceholderPanel {
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = () => {
-                    this.setImageContent(slotName, reader.result as string);
+                    this.setImageContentFor(slotName, reader.result as string, manager, entries);
                     imgStatus.textContent = file.name;
                 };
                 reader.readAsDataURL(file);
@@ -196,109 +270,98 @@ export class PlaceholderPanel {
         clearBtn.textContent = '\u2715';
         clearBtn.title = 'Clear content';
         clearBtn.addEventListener('click', () => {
-            this.clearSlotContent(slotName);
+            this.clearSlotContentIn(slotName, entries);
             textInput.value = '';
             imgStatus.textContent = '';
         });
         imgRow.appendChild(clearBtn);
         contentRow.appendChild(imgRow);
-
         wrapper.appendChild(contentRow);
 
-        // Toggle logic
         input.addEventListener('change', () => {
             if (input.checked) {
-                this.showMarker(slotName);
+                this.showMarkerFor(slotName, manager, entries);
                 contentRow.style.display = 'flex';
             } else {
-                this.hideSlot(slotName);
+                this.hideSlotIn(slotName, entries);
                 contentRow.style.display = 'none';
                 textInput.value = '';
                 imgStatus.textContent = '';
             }
         });
 
-        this.listEl.appendChild(wrapper);
+        container.appendChild(wrapper);
     }
 
-    private getOrCreateEntry(slotName: string): PlaceholderEntry {
-        if (!this.entries.has(slotName)) {
-            this.entries.set(slotName, {
-                slotName,
-                marker: null,
-                contentSprite: null,
-                contentText: null,
-                rafId: null,
-                container: null,
-            });
+    // ── Context-aware helpers ────────────────────────────────────────────────
+
+    private getOrCreateEntryIn(slotName: string, entries: Entries): PlaceholderEntry {
+        if (!entries.has(slotName)) {
+            entries.set(slotName, { slotName, marker: null, markerRafId: null, contentSprite: null, contentText: null, rafId: null, container: null });
         }
-        return this.entries.get(slotName)!;
+        return entries.get(slotName)!;
     }
 
-    private getSlotContainer(slotName: string): Container | null {
-        const spine = this.spineManager.spine;
+    private getSlotContainerFrom(slotName: string, manager: SpineManager): Container | null {
+        const spine = manager.spine;
         if (!spine) return null;
         if (spine instanceof SpineElement) {
-            try {
-                return spine.getSlotContainer(slotName) as Container;
-            } catch {
-                return null;
-            }
+            try { return spine.getSlotContainer(slotName) as Container; } catch { return null; }
         }
         return null;
     }
 
-    private showMarker(slotName: string): void {
-        const entry = this.getOrCreateEntry(slotName);
+    private showMarkerFor(slotName: string, manager: SpineManager, entries: Entries): void {
+        const entry = this.getOrCreateEntryIn(slotName, entries);
         if (entry.marker) return;
 
-        const spine = this.spineManager.spine;
+        const spine = manager.spine;
         if (!spine) return;
 
         const g = new Graphics();
         g.zIndex = 999;
         const size = 12;
         g.lineStyle(2, 0xff6600, 0.9);
-        g.moveTo(-size, 0);
-        g.lineTo(size, 0);
-        g.moveTo(0, -size);
-        g.lineTo(0, size);
+        g.moveTo(-size, 0); g.lineTo(size, 0);
+        g.moveTo(0, -size); g.lineTo(0, size);
         g.lineStyle(1, 0xff6600, 0.5);
         g.drawCircle(0, 0, size);
 
-        const label = new Text(slotName, {
-            fontSize: 9,
-            fill: '#ff8800',
-            fontFamily: 'Arial',
-            fontWeight: 'bold',
-            stroke: '#000000',
-            strokeThickness: 2,
+        const labelText = new Text(slotName, {
+            fontSize: 9, fill: '#ff8800', fontFamily: 'Arial',
+            fontWeight: 'bold', stroke: '#000000', strokeThickness: 2,
         } as any);
-        label.position.set(size + 3, -5);
-        g.addChild(label);
+        labelText.position.set(size + 3, -5);
+        g.addChild(labelText);
 
-        const slotContainer = this.getSlotContainer(slotName);
-        if (slotContainer) {
-            slotContainer.addChild(g);
-            entry.container = slotContainer;
-        } else {
-            const slot = spine.skeleton.findSlot(slotName);
-            if (slot?.bone) {
-                g.position.set(slot.bone.worldX, slot.bone.worldY);
-            }
-            spine.addChild(g);
-        }
+        // Place at current bone position
+        const slot = spine.skeleton.findSlot(slotName);
+        if (slot?.bone) g.position.set(slot.bone.worldX, slot.bone.worldY);
+        spine.addChild(g);
 
         entry.marker = g;
+        // Keep updating position so marker follows the animation
+        entry.markerRafId = this.startMarkerPositionUpdate(slotName, g, manager, entries);
     }
 
-    private setTextContent(slotName: string, text: string, style: { fontSize: number; fill: string; stroke?: string; strokeThickness?: number; fontFamily?: string; fontWeight?: string; fontStyle?: string } = { fontSize: 14, fill: '#ffffff' }): void {
-        const entry = this.getOrCreateEntry(slotName);
-        this.clearSlotContent(slotName);
+    private startMarkerPositionUpdate(slotName: string, g: Graphics, manager: SpineManager, entries: Entries): number {
+        const update = () => {
+            const spine = manager.spine;
+            if (!spine) return;
+            const slot = spine.skeleton.findSlot(slotName);
+            if (slot?.bone) g.position.set(slot.bone.worldX, slot.bone.worldY);
+            const entry = entries.get(slotName);
+            if (entry?.marker) entry.markerRafId = requestAnimationFrame(update);
+        };
+        return requestAnimationFrame(update);
+    }
 
+    private setTextContentFor(slotName: string, text: string, style: { fontSize: number; fill: string; stroke?: string; strokeThickness?: number; fontFamily?: string; fontWeight?: string; fontStyle?: string }, manager: SpineManager, entries: Entries): void {
+        const entry = this.getOrCreateEntryIn(slotName, entries);
+        this.clearSlotContentIn(slotName, entries);
         if (!text.trim()) return;
 
-        const spine = this.spineManager.spine;
+        const spine = manager.spine;
         if (!spine) return;
 
         const pixiText = new Text(text, {
@@ -313,19 +376,108 @@ export class PlaceholderPanel {
         pixiText.anchor.set(0.5, 0.5);
         pixiText.zIndex = 1000;
 
-        const slotContainer = this.getSlotContainer(slotName);
+        const slotContainer = this.getSlotContainerFrom(slotName, manager);
         if (slotContainer) {
             slotContainer.addChild(pixiText);
             entry.container = slotContainer;
         } else {
             spine.addChild(pixiText);
-            entry.rafId = this.startPositionUpdate(slotName, pixiText);
+            entry.rafId = this.startPositionUpdateFor(slotName, pixiText, manager, entries);
         }
         entry.contentText = pixiText;
     }
 
+    private setImageContentFor(slotName: string, dataUrl: string, manager: SpineManager, entries: Entries): void {
+        const entry = this.getOrCreateEntryIn(slotName, entries);
+        if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
+        if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
+        if (entry.rafId !== null) { cancelAnimationFrame(entry.rafId); entry.rafId = null; }
+
+        const spine = manager.spine;
+        if (!spine) return;
+
+        const img = new Image();
+        img.onload = () => {
+            const texture = Texture.from(img);
+            const sprite = new Sprite(texture);
+            sprite.anchor.set(0.5, 0.5);
+            sprite.zIndex = 1000;
+
+            const slotContainer = this.getSlotContainerFrom(slotName, manager);
+            if (slotContainer) {
+                slotContainer.addChild(sprite);
+                entry.container = slotContainer;
+            } else {
+                spine.addChild(sprite);
+                entry.rafId = this.startPositionUpdateFor(slotName, sprite, manager, entries);
+            }
+            entry.contentSprite = sprite;
+        };
+        img.src = dataUrl;
+    }
+
+    private startPositionUpdateFor(slotName: string, obj: { position: { set(x: number, y: number): void } }, manager: SpineManager, entries: Entries): number {
+        const update = () => {
+            const spine = manager.spine;
+            if (!spine) return;
+            const slot = spine.skeleton.findSlot(slotName);
+            if (slot?.bone) obj.position.set(slot.bone.worldX, slot.bone.worldY);
+            const entry = entries.get(slotName);
+            if (entry) entry.rafId = requestAnimationFrame(update);
+        };
+        return requestAnimationFrame(update);
+    }
+
+    private clearSlotContentIn(slotName: string, entries: Entries): void {
+        const entry = entries.get(slotName);
+        if (!entry) return;
+        if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
+        if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
+        if (entry.rafId !== null) { cancelAnimationFrame(entry.rafId); entry.rafId = null; }
+    }
+
+    private hideSlotIn(slotName: string, entries: Entries): void {
+        const entry = entries.get(slotName);
+        if (!entry) return;
+        if (entry.markerRafId !== null) { cancelAnimationFrame(entry.markerRafId); entry.markerRafId = null; }
+        if (entry.marker) { entry.marker.destroy(); entry.marker = null; }
+        this.clearSlotContentIn(slotName, entries);
+        entries.delete(slotName);
+    }
+
+    private clearEntriesMap(entries: Entries): void {
+        entries.forEach((_, slotName) => this.hideSlotIn(slotName, entries));
+        entries.clear();
+    }
+
+    private toggleAll(): void {
+        const show = this.showAllToggle.checked;
+
+        if (this.isCompareMode) {
+            this.compareProjects.forEach(project => {
+                const entries = this.getProjectEntries(project.manager);
+                if (show) {
+                    project.manager.getSlotNames().forEach(name => this.showMarkerFor(name, project.manager, entries));
+                } else {
+                    project.manager.getSlotNames().forEach(name => this.hideSlotIn(name, entries));
+                }
+            });
+        } else {
+            const slotNames = this.stateManager.projectA?.slotNames ?? [];
+            if (show) {
+                slotNames.forEach(name => this.showMarkerFor(name, this.spineManager, this.entries));
+            } else {
+                slotNames.forEach(name => this.hideSlotIn(name, this.entries));
+            }
+        }
+
+        // Sync toggle state in DOM
+        this.listEl.querySelectorAll('input[type="checkbox"]').forEach(t => {
+            (t as HTMLInputElement).checked = show;
+        });
+    }
+
     private openTextStyleDialog(current: { fontSize: number; fill: string; stroke: string; strokeThickness: number; fontFamily: string; fontWeight: string; fontStyle: string }, onApply: (style: typeof current) => void): void {
-        // Remove existing dialog if open
         document.getElementById('sv-text-style-dialog')?.remove();
 
         const overlay = document.createElement('div');
@@ -462,87 +614,5 @@ export class PlaceholderPanel {
         overlay.appendChild(dialog);
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
         document.body.appendChild(overlay);
-    }
-
-    private setImageContent(slotName: string, dataUrl: string): void {
-        const entry = this.getOrCreateEntry(slotName);
-        // Remove old sprite/text but keep marker
-        if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
-        if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
-        if (entry.rafId !== null) { cancelAnimationFrame(entry.rafId); entry.rafId = null; }
-
-        const spine = this.spineManager.spine;
-        if (!spine) return;
-
-        const img = new Image();
-        img.onload = () => {
-            const texture = Texture.from(img);
-            const sprite = new Sprite(texture);
-            sprite.anchor.set(0.5, 0.5);
-            sprite.zIndex = 1000;
-
-            const slotContainer = this.getSlotContainer(slotName);
-            if (slotContainer) {
-                slotContainer.addChild(sprite);
-                entry.container = slotContainer;
-            } else {
-                spine.addChild(sprite);
-                entry.rafId = this.startPositionUpdate(slotName, sprite);
-            }
-            entry.contentSprite = sprite;
-        };
-        img.src = dataUrl;
-    }
-
-    private startPositionUpdate(slotName: string, obj: { position: { set(x: number, y: number): void } }): number {
-        const update = () => {
-            const spine = this.spineManager.spine;
-            if (!spine) return;
-            const slot = spine.skeleton.findSlot(slotName);
-            if (slot?.bone) {
-                obj.position.set(slot.bone.worldX, slot.bone.worldY);
-            }
-            const entry = this.entries.get(slotName);
-            if (entry) {
-                entry.rafId = requestAnimationFrame(update);
-            }
-        };
-        return requestAnimationFrame(update);
-    }
-
-    private clearSlotContent(slotName: string): void {
-        const entry = this.entries.get(slotName);
-        if (!entry) return;
-        if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
-        if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
-        if (entry.rafId !== null) { cancelAnimationFrame(entry.rafId); entry.rafId = null; }
-    }
-
-    private hideSlot(slotName: string): void {
-        const entry = this.entries.get(slotName);
-        if (!entry) return;
-        if (entry.marker) { entry.marker.destroy(); entry.marker = null; }
-        this.clearSlotContent(slotName);
-        this.entries.delete(slotName);
-    }
-
-    private toggleAll(): void {
-        const show = this.showAllToggle.checked;
-        const project = this.stateManager.projectA;
-        if (!project) return;
-
-        if (show) {
-            project.slotNames.forEach(name => this.showMarker(name));
-        } else {
-            project.slotNames.forEach(name => this.hideSlot(name));
-        }
-
-        const toggles = this.listEl.querySelectorAll('input[type="checkbox"]');
-        toggles.forEach(t => (t as HTMLInputElement).checked = show);
-    }
-
-    private clearAll(): void {
-        this.entries.forEach((_, slotName) => this.hideSlot(slotName));
-        this.entries.clear();
     }
 }

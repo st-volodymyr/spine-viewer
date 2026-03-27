@@ -15,16 +15,85 @@ export class AtlasInspectorPanel {
     private selectedRegion: AtlasRegion | null = null;
     private usedRegionNames: Set<string> = new Set();
 
+    private compareAtlases: Map<string, { atlas: ParsedAtlas; textures: SpineFileSet['textures'] }> = new Map();
+    private isCompareMode = false;
+    private activeAtlasProject = '';
+    private projectSelectorRow!: HTMLElement;
+    private projectSelector!: HTMLSelectElement;
+    private compareSection!: HTMLElement;
+    private compareSectionBody!: HTMLElement;
+
     constructor() {
         this.element = document.createElement('div');
         this.element.style.display = 'flex';
         this.element.style.flexDirection = 'column';
         this.build();
 
-        eventBus.on('atlas:loaded', (data: { atlas: ParsedAtlas; textures: SpineFileSet['textures']; usedRegionNames?: Set<string> }) => {
-            this.usedRegionNames = data.usedRegionNames ?? new Set();
-            this.setAtlasData(data.atlas, data.textures);
+        eventBus.on('atlas:loaded', (data: { atlas: ParsedAtlas; textures: SpineFileSet['textures']; usedRegionNames?: Set<string>; projectName?: string }) => {
+            if (data.projectName) {
+                // Store as comparison project atlas
+                this.compareAtlases.set(data.projectName, { atlas: data.atlas, textures: data.textures });
+                this.updateProjectSelector();
+                // If this is the currently active compare project (or first one), display it
+                if (!this.isCompareMode) {
+                    this.usedRegionNames = data.usedRegionNames ?? new Set();
+                    this.setAtlasData(data.atlas, data.textures);
+                } else if (!this.activeAtlasProject || this.activeAtlasProject === data.projectName) {
+                    this.activeAtlasProject = data.projectName;
+                    this.projectSelector.value = data.projectName;
+                    this.usedRegionNames = new Set();
+                    this.setAtlasData(data.atlas, data.textures);
+                }
+                if (this.isCompareMode) this.renderAtlasDiff();
+            } else {
+                // Single-mode atlas (no projectName)
+                this.usedRegionNames = data.usedRegionNames ?? new Set();
+                if (!this.isCompareMode) {
+                    this.setAtlasData(data.atlas, data.textures);
+                }
+            }
         });
+
+        eventBus.on('mode:change', (mode: string) => {
+            this.isCompareMode = mode === 'comparison';
+            this.projectSelectorRow.style.display = this.isCompareMode ? 'flex' : 'none';
+            if (this.isCompareMode) {
+                this.updateProjectSelector();
+                // Show first compare atlas if available
+                const firstEntry = this.compareAtlases.size > 0
+                    ? this.compareAtlases.entries().next().value
+                    : null;
+                if (firstEntry) {
+                    this.activeAtlasProject = firstEntry[0] as string;
+                    this.projectSelector.value = this.activeAtlasProject;
+                    this.usedRegionNames = new Set();
+                    this.setAtlasData(firstEntry[1].atlas, firstEntry[1].textures);
+                }
+                this.renderAtlasDiff();
+            }
+        });
+
+        eventBus.on('comparison:projects-changed', (projects: Array<{ name: string }>) => {
+            const names = new Set(projects.map(p => p.name));
+            for (const key of this.compareAtlases.keys()) {
+                if (!names.has(key)) this.compareAtlases.delete(key);
+            }
+            this.updateProjectSelector();
+            if (this.isCompareMode) this.renderAtlasDiff();
+        });
+    }
+
+    private updateProjectSelector(): void {
+        this.projectSelector.innerHTML = '';
+        this.compareAtlases.forEach((_, name) => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            this.projectSelector.appendChild(opt);
+        });
+        if (this.activeAtlasProject) {
+            this.projectSelector.value = this.activeAtlasProject;
+        }
     }
 
     private build(): void {
@@ -56,6 +125,51 @@ export class AtlasInspectorPanel {
         this.detailPanel.className = 'sv-detail-panel';
         this.detailPanel.style.flexShrink = '0';
         this.element.appendChild(this.detailPanel);
+
+        // Project selector (compare mode only)
+        this.projectSelectorRow = document.createElement('div');
+        this.projectSelectorRow.style.cssText = 'display:none;align-items:center;gap:6px;padding:4px 0';
+        const projectSelectorLabel = document.createElement('span');
+        projectSelectorLabel.style.cssText = 'font-size:var(--sv-font-size-sm);color:var(--sv-text-muted);white-space:nowrap';
+        projectSelectorLabel.textContent = 'Project:';
+        this.projectSelectorRow.appendChild(projectSelectorLabel);
+        this.projectSelector = document.createElement('select');
+        this.projectSelector.className = 'sv-select';
+        this.projectSelector.style.flex = '1';
+        this.projectSelector.addEventListener('change', () => {
+            const name = this.projectSelector.value;
+            const entry = this.compareAtlases.get(name);
+            if (entry) {
+                this.activeAtlasProject = name;
+                this.usedRegionNames = new Set();
+                this.setAtlasData(entry.atlas, entry.textures);
+            }
+        });
+        this.projectSelectorRow.appendChild(this.projectSelector);
+        this.element.appendChild(this.projectSelectorRow);
+
+        // Compare diff section (compare mode only)
+        this.compareSection = document.createElement('div');
+        this.compareSection.style.display = 'none';
+        this.compareSection.style.marginBottom = '4px';
+
+        const compareHeader = document.createElement('div');
+        compareHeader.style.cssText = 'cursor:pointer;font-size:10px;color:var(--sv-text-muted);font-weight:600;letter-spacing:0.4px;padding:4px 0;display:flex;align-items:center;gap:4px';
+        const compareArrow = document.createElement('span');
+        compareArrow.className = 'sv-section-arrow';
+        compareArrow.textContent = '▼';
+        compareHeader.appendChild(compareArrow);
+        compareHeader.appendChild(Object.assign(document.createElement('span'), { textContent: 'ATLAS COMPARE' }));
+        compareHeader.addEventListener('click', () => {
+            const collapsed = compareHeader.classList.toggle('collapsed');
+            compareArrow.style.transform = collapsed ? 'rotate(-90deg)' : '';
+            this.compareSectionBody.style.display = collapsed ? 'none' : 'block';
+        });
+        this.compareSection.appendChild(compareHeader);
+
+        this.compareSectionBody = document.createElement('div');
+        this.compareSection.appendChild(this.compareSectionBody);
+        this.element.appendChild(this.compareSection);
 
         // Search
         this.searchInput = document.createElement('input');
@@ -398,6 +512,80 @@ export class AtlasInspectorPanel {
         } else if (firstImg) {
             firstImg.onload = () => drawPage(firstPage.name);
         }
+    }
+
+    private renderAtlasDiff(): void {
+        this.compareSectionBody.innerHTML = '';
+        if (this.compareAtlases.size < 2) {
+            this.compareSection.style.display = 'none';
+            return;
+        }
+        this.compareSection.style.display = 'block';
+
+        const entries = [...this.compareAtlases.entries()];
+        const [nameA, dataA] = entries[0];
+        const [nameB, dataB] = entries[1];
+        const regionsA = new Set(dataA.atlas.regions.map(r => r.name));
+        const regionsB = new Set(dataB.atlas.regions.map(r => r.name));
+
+        const onlyA = dataA.atlas.regions.filter(r => !regionsB.has(r.name));
+        const onlyB = dataB.atlas.regions.filter(r => !regionsA.has(r.name));
+        const shared = dataA.atlas.regions.filter(r => regionsB.has(r.name));
+
+        // Summary row
+        const summary = document.createElement('div');
+        summary.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:4px 0;font-size:10px';
+        ([
+            [nameA, `${dataA.atlas.regions.length} rgn`],
+            ['Shared', `${shared.length}`],
+            [nameB, `${dataB.atlas.regions.length} rgn`],
+        ] as [string, string][]).forEach(([label, value]) => {
+            const cell = document.createElement('div');
+            cell.style.cssText = 'text-align:center';
+            const v = document.createElement('div');
+            v.style.cssText = 'font-weight:600;font-family:var(--sv-font-mono)';
+            v.textContent = value;
+            const l = document.createElement('div');
+            l.style.cssText = 'color:var(--sv-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+            l.textContent = label;
+            l.title = label;
+            cell.appendChild(v);
+            cell.appendChild(l);
+            summary.appendChild(cell);
+        });
+        this.compareSectionBody.appendChild(summary);
+
+        const renderGroup = (title: string, regions: Array<{ name: string; width: number; height: number }>, color: string) => {
+            if (regions.length === 0) return;
+            const hdr = document.createElement('div');
+            hdr.style.cssText = `font-size:10px;font-weight:600;padding:4px 0 2px;color:${color}`;
+            hdr.textContent = `${title} (${regions.length})`;
+            this.compareSectionBody.appendChild(hdr);
+            const maxShow = 8;
+            regions.slice(0, maxShow).forEach(r => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;gap:4px;font-size:10px;padding:1px 0';
+                const name = document.createElement('span');
+                name.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sv-text-secondary)';
+                name.textContent = r.name;
+                name.title = r.name;
+                const size = document.createElement('span');
+                size.style.cssText = 'color:var(--sv-text-muted);font-family:var(--sv-font-mono);flex-shrink:0';
+                size.textContent = `${r.width}×${r.height}`;
+                row.appendChild(name);
+                row.appendChild(size);
+                this.compareSectionBody.appendChild(row);
+            });
+            if (regions.length > maxShow) {
+                const more = document.createElement('div');
+                more.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:1px 0';
+                more.textContent = `…and ${regions.length - maxShow} more`;
+                this.compareSectionBody.appendChild(more);
+            }
+        };
+
+        renderGroup(`Only in ${nameA}`, onlyA, 'var(--sv-diff-only-a, #5ba3f5)');
+        renderGroup(`Only in ${nameB}`, onlyB, 'var(--sv-diff-only-b, #f5955b)');
     }
 
     private drawPreview(region: AtlasRegion): void {

@@ -5,6 +5,11 @@ import type { SpineManager } from '../../core/SpineManager';
 import type { TreeNode } from '../../types/ui';
 import { Graphics } from '@electricelephants/pixi-ext';
 
+interface CompareProjectRef {
+    name: string;
+    manager: SpineManager;
+}
+
 export class SkeletonInspectorPanel {
     element: HTMLElement;
     private tabs: Map<string, HTMLElement> = new Map();
@@ -14,11 +19,38 @@ export class SkeletonInspectorPanel {
     private detailPanel: HTMLElement;
     private highlightGraphics: Graphics | null = null;
 
+    private isCompareMode = false;
+    private compareProjects: CompareProjectRef[] = [];
+    private activeManager: SpineManager;
+    private projectSelectorRow!: HTMLElement;
+    private projectSelector!: HTMLSelectElement;
+
     constructor(private spineManager: SpineManager) {
+        this.activeManager = spineManager;
         this.element = document.createElement('div');
         this.element.style.display = 'flex';
         this.element.style.flexDirection = 'column';
         this.element.style.height = '100%';
+
+        // Project selector (compare mode only)
+        this.projectSelectorRow = document.createElement('div');
+        this.projectSelectorRow.style.cssText = 'display:none;align-items:center;gap:6px;padding:4px;border-bottom:1px solid var(--sv-border);flex-shrink:0';
+        const projectSelectorLabel = document.createElement('span');
+        projectSelectorLabel.style.cssText = 'font-size:var(--sv-font-size-sm);color:var(--sv-text-muted);white-space:nowrap';
+        projectSelectorLabel.textContent = 'Project:';
+        this.projectSelectorRow.appendChild(projectSelectorLabel);
+        this.projectSelector = document.createElement('select');
+        this.projectSelector.className = 'sv-select';
+        this.projectSelector.style.flex = '1';
+        this.projectSelector.addEventListener('change', () => {
+            const project = this.compareProjects.find(p => p.name === this.projectSelector.value);
+            if (project) {
+                this.activeManager = project.manager;
+                this.refresh();
+            }
+        });
+        this.projectSelectorRow.appendChild(this.projectSelector);
+        this.element.appendChild(this.projectSelectorRow);
 
         // Internal tab bar
         this.tabBar = document.createElement('div');
@@ -46,7 +78,43 @@ export class SkeletonInspectorPanel {
 
         this.buildTabs();
 
-        eventBus.on('project:change', () => this.refresh());
+        eventBus.on('project:change', () => {
+            if (!this.isCompareMode) this.refresh();
+        });
+        eventBus.on('mode:change', (mode: string) => {
+            this.isCompareMode = mode === 'comparison';
+            this.projectSelectorRow.style.display = this.isCompareMode ? 'flex' : 'none';
+            if (!this.isCompareMode) {
+                this.activeManager = this.spineManager;
+                this.refresh();
+            }
+        });
+        eventBus.on('comparison:projects-changed', (projects: CompareProjectRef[]) => {
+            this.compareProjects = projects;
+            this.updateProjectSelector();
+            if (this.isCompareMode && projects.length > 0) {
+                // Keep active project if still exists, otherwise pick first
+                const stillExists = projects.some(p => p.manager === this.activeManager);
+                if (!stillExists) {
+                    this.activeManager = projects[0].manager;
+                    this.projectSelector.value = projects[0].name;
+                }
+                this.refresh();
+            }
+        });
+    }
+
+    private updateProjectSelector(): void {
+        this.projectSelector.innerHTML = '';
+        this.compareProjects.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name;
+            this.projectSelector.appendChild(opt);
+        });
+        // Select the option matching activeManager
+        const activeName = this.compareProjects.find(p => p.manager === this.activeManager)?.name;
+        if (activeName) this.projectSelector.value = activeName;
     }
 
     private buildTabs(): void {
@@ -79,7 +147,7 @@ export class SkeletonInspectorPanel {
     }
 
     refresh(): void {
-        const spineData = this.spineManager.spineData;
+        const spineData = this.activeManager.spineData;
         if (!spineData) return;
 
         const introspection = introspectSkeleton(spineData as any);
@@ -147,30 +215,28 @@ export class SkeletonInspectorPanel {
 
         // If animation, play it
         if (node.data?.type === 'animation') {
-            this.spineManager.setAnimation(0, node.label, true);
+            this.activeManager.setAnimation(0, node.label, true);
         }
 
         // If skin, apply it
         if (node.data?.type === 'skin') {
-            this.spineManager.setSkin(node.label);
+            this.activeManager.setSkin(node.label);
         }
     }
 
     private highlightNode(node: TreeNode): void {
         this.clearHighlight();
-        if (!this.spineManager.spine) return;
+        if (!this.activeManager.spine) return;
 
-        const spine = this.spineManager.spine;
+        const spine = this.activeManager.spine;
 
         if (node.data?.type === 'bone') {
             const bone = spine.skeleton.findBone(node.label);
             if (bone) {
                 this.highlightGraphics = new Graphics();
                 this.highlightGraphics.zIndex = 1000;
-                // Draw circle at bone position
                 this.highlightGraphics.lineStyle(2, 0xff4444, 0.8);
                 this.highlightGraphics.drawCircle(bone.worldX, bone.worldY, 8);
-                // Draw bone line
                 if (bone.data.length > 0) {
                     const angle = bone.getWorldRotationX() * Math.PI / 180;
                     const endX = bone.worldX + Math.cos(angle) * bone.data.length;
