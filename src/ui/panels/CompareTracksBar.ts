@@ -1,6 +1,5 @@
 import { eventBus } from '../../core/EventBus';
-import type { StateManager } from '../../core/StateManager';
-import type { SpineManager } from '../../core/SpineManager';
+import type { ComparisonPanel } from './ComparisonPanel';
 
 interface TrackRowElements {
     row: HTMLElement;
@@ -12,11 +11,10 @@ interface TrackRowElements {
 }
 
 /**
- * Horizontal bar below the viewport showing all active animation tracks.
- * Each track is a full row with animation selector, progress, loop, speed, and stop controls.
+ * Tracks bar for comparison mode — mirrors ActiveTracksBar but routes all
+ * playback changes through ComparisonPanel so every loaded project stays in sync.
  */
-export class ActiveTracksBar {
-    private container: HTMLElement;
+export class CompareTracksBar {
     private inner: HTMLElement;
     private emptyMsg: HTMLElement;
     private trackRows = new Map<number, TrackRowElements>();
@@ -24,48 +22,61 @@ export class ActiveTracksBar {
 
     constructor(
         mountPoint: HTMLElement,
-        private stateManager: StateManager,
-        private spineManager: SpineManager,
+        private comparisonPanel: ComparisonPanel,
     ) {
-        this.container = mountPoint;
-
         this.inner = document.createElement('div');
         this.inner.className = 'sv-tracks-bar-inner';
-        this.container.appendChild(this.inner);
+        this.inner.style.display = 'none';
+        mountPoint.appendChild(this.inner);
 
         this.emptyMsg = document.createElement('div');
         this.emptyMsg.className = 'sv-tracks-bar-empty';
         this.emptyMsg.textContent = 'No active tracks';
         this.inner.appendChild(this.emptyMsg);
 
-        eventBus.on('project:change', () => {
-            this.clear();
-            this.startUpdates();
+        eventBus.on('mode:change', (mode: string) => {
+            if (mode === 'comparison') {
+                this.inner.style.display = '';
+                this.startUpdates();
+            } else {
+                this.inner.style.display = 'none';
+                this.stopUpdates();
+                this.clear();
+            }
         });
 
-        eventBus.on('mode:change', (mode: string) => {
-            this.inner.style.display = mode === 'comparison' ? 'none' : '';
-        });
+        eventBus.on('comparison:projects-changed', () => this.clear());
     }
 
     private clear(): void {
-        for (const [, row] of this.trackRows) {
-            row.row.remove();
-        }
+        for (const [, row] of this.trackRows) row.row.remove();
         this.trackRows.clear();
         this.emptyMsg.style.display = '';
     }
 
     private startUpdates(): void {
-        if (this.statusInterval !== null) clearInterval(this.statusInterval);
+        if (this.statusInterval !== null) return;
         this.statusInterval = setInterval(() => this.update(), 150);
     }
 
+    private stopUpdates(): void {
+        if (this.statusInterval !== null) {
+            clearInterval(this.statusInterval);
+            this.statusInterval = null;
+        }
+    }
+
     private update(): void {
-        const tracks = this.spineManager.getAllActiveTracks();
+        const projects = this.comparisonPanel.getProjects();
+        if (projects.length === 0) {
+            this.clear();
+            return;
+        }
+
+        const masterManager = projects[0].manager;
+        const tracks = masterManager.getAllActiveTracks();
         const activeIndices = new Set(tracks.map(t => t.trackIndex));
 
-        // Remove rows for stopped tracks immediately
         for (const [idx, rowData] of this.trackRows) {
             if (!activeIndices.has(idx)) {
                 rowData.row.remove();
@@ -80,14 +91,17 @@ export class ActiveTracksBar {
 
         this.emptyMsg.style.display = 'none';
 
-        const project = this.stateManager.projectA;
-        const animNames = project?.animationNames ?? [];
+        // Union of all animation names across projects
+        const allAnims = new Set<string>();
+        projects.forEach(p => p.manager.getAnimationNames().forEach(a => allAnims.add(a)));
+        const animNames = [...allAnims];
+
+        const speed = masterManager.getSpeed?.() ?? 1;
 
         for (const t of tracks) {
             const pct = t.duration > 0 ? Math.min(100, (t.time / t.duration) * 100) : 0;
 
             if (this.trackRows.has(t.trackIndex)) {
-                // Update existing row
                 const r = this.trackRows.get(t.trackIndex)!;
                 r.progressFill.style.width = `${pct}%`;
                 r.timeEl.textContent = t.loop
@@ -95,16 +109,10 @@ export class ActiveTracksBar {
                     : `${t.time.toFixed(1)}s / ${t.duration.toFixed(1)}s`;
                 r.loopBtn.textContent = t.loop ? '\u221E' : '1\u00D7';
                 r.loopBtn.title = t.loop ? 'Looping (click: play once)' : 'Play once (click: loop)';
-                // Sync animation name if changed externally
-                if (r.animSelect.value !== t.name) {
-                    r.animSelect.value = t.name;
-                }
-                // Show current speed
-                const speed = this.spineManager.getSpeed?.() ?? 1;
+                if (r.animSelect.value !== t.name) r.animSelect.value = t.name;
                 r.speedEl.textContent = `${speed.toFixed(1)}x`;
             } else {
-                // Create new row
-                this.createRow(t, pct, animNames);
+                this.createRow(t, pct, animNames, speed);
             }
         }
     }
@@ -113,17 +121,16 @@ export class ActiveTracksBar {
         t: { trackIndex: number; name: string; time: number; duration: number; loop: boolean },
         pct: number,
         animNames: string[],
+        speed: number,
     ): void {
         const row = document.createElement('div');
         row.className = 'sv-track-row';
 
-        // Track badge
         const badge = document.createElement('span');
         badge.className = 'sv-track-row-badge';
         badge.textContent = `T${t.trackIndex}`;
         row.appendChild(badge);
 
-        // Animation select dropdown
         const animSelect = document.createElement('select');
         animSelect.className = 'sv-select sv-track-row-select';
         animNames.forEach(name => {
@@ -134,26 +141,24 @@ export class ActiveTracksBar {
         });
         animSelect.value = t.name;
         animSelect.addEventListener('change', () => {
-            const current = (this.spineManager.spine?.state as any)?.getCurrent(t.trackIndex);
-            const loop = current?.loop ?? true;
-            this.spineManager.setAnimation(t.trackIndex, animSelect.value, loop);
+            const current = this.comparisonPanel.getProjects()[0]?.manager.spine?.state?.getCurrent(t.trackIndex);
+            const loop = current?.loop ?? t.loop;
+            this.comparisonPanel.playAnimation(animSelect.value, t.trackIndex, loop);
         });
         row.appendChild(animSelect);
 
-        // Loop toggle button
         const loopBtn = document.createElement('button');
         loopBtn.className = 'sv-track-row-btn';
         loopBtn.textContent = t.loop ? '\u221E' : '1\u00D7';
         loopBtn.title = t.loop ? 'Looping (click: play once)' : 'Play once (click: loop)';
         loopBtn.addEventListener('click', () => {
-            const current = (this.spineManager.spine?.state as any)?.getCurrent(t.trackIndex);
+            const current = this.comparisonPanel.getProjects()[0]?.manager.spine?.state?.getCurrent(t.trackIndex);
             if (current) {
-                this.spineManager.setTrackLoop(t.trackIndex, !current.loop);
+                this.comparisonPanel.setTrackLoop(t.trackIndex, !current.loop);
             }
         });
         row.appendChild(loopBtn);
 
-        // Progress bar
         const progWrap = document.createElement('div');
         progWrap.className = 'sv-track-row-progress';
         const fill = document.createElement('div');
@@ -162,7 +167,6 @@ export class ActiveTracksBar {
         progWrap.appendChild(fill);
         row.appendChild(progWrap);
 
-        // Time
         const timeEl = document.createElement('span');
         timeEl.className = 'sv-track-row-time';
         timeEl.textContent = t.loop
@@ -170,26 +174,20 @@ export class ActiveTracksBar {
             : `${t.time.toFixed(1)}s / ${t.duration.toFixed(1)}s`;
         row.appendChild(timeEl);
 
-        // Speed display
         const speedEl = document.createElement('span');
         speedEl.className = 'sv-track-row-speed';
-        const speed = this.spineManager.getSpeed?.() ?? 1;
         speedEl.textContent = `${speed.toFixed(1)}x`;
         row.appendChild(speedEl);
 
-        // Stop button
         const stopBtn = document.createElement('button');
         stopBtn.className = 'sv-track-row-btn sv-track-row-stop';
         stopBtn.textContent = '\u25A0';
         stopBtn.title = `Stop track ${t.trackIndex}`;
         stopBtn.addEventListener('click', () => {
-            this.spineManager.clearTrack(t.trackIndex);
-            // Immediately remove the row for instant feedback
+            this.comparisonPanel.clearTrack(t.trackIndex);
             row.remove();
             this.trackRows.delete(t.trackIndex);
-            if (this.trackRows.size === 0) {
-                this.emptyMsg.style.display = '';
-            }
+            if (this.trackRows.size === 0) this.emptyMsg.style.display = '';
         });
         row.appendChild(stopBtn);
 

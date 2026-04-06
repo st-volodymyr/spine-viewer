@@ -28,8 +28,8 @@ export class ComparisonPanel {
     private viewport: Viewport;
     private comparisonActive = false;
 
-    // Track last-applied playback state for syncing new projects
-    private lastAnimation: { name: string; loop: boolean } | null = null;
+    // Track last-applied playback state per track for syncing new projects
+    private lastTracks: Map<number, { name: string; loop: boolean }> = new Map();
     private lastSpeed = 1;
     private lastSkin: string | null = null;
 
@@ -90,7 +90,7 @@ export class ComparisonPanel {
     /** Seed tracking state from the single-mode manager so new projects sync correctly */
     initCompareStateFrom(manager: SpineManager, currentSkin: string | null): void {
         const track = manager.getCurrentTrackInfo(0);
-        if (track) this.lastAnimation = { name: track.name, loop: track.loop };
+        if (track) this.lastTracks.set(0, { name: track.name, loop: track.loop });
         this.lastSpeed = manager.getSpeed();
         this.lastSkin = currentSkin;
     }
@@ -118,7 +118,7 @@ export class ComparisonPanel {
         this.updateDiff();
         this.updateEmptyState();
         this.comparisonActive = false;
-        this.lastAnimation = null;
+        this.lastTracks.clear();
         this.lastSpeed = 1;
         this.lastSkin = null;
         eventBus.emit('comparison:projects-changed', this.projects);
@@ -134,7 +134,7 @@ export class ComparisonPanel {
         this.updateDiff();
         this.updateEmptyState();
         this.comparisonActive = false;
-        this.lastAnimation = null;
+        this.lastTracks.clear();
         this.lastSpeed = 1;
         this.lastSkin = null;
         eventBus.emit('comparison:projects-changed', this.projects);
@@ -186,11 +186,11 @@ export class ComparisonPanel {
         }
     }
 
-    playAnimation(name: string, loop = true): void {
-        this.lastAnimation = { name, loop };
+    playAnimation(name: string, trackIndex = 0, loop = true): void {
+        this.lastTracks.set(trackIndex, { name, loop });
         this.projects.forEach(p => {
             if (p.manager.getAnimationNames().includes(name)) {
-                p.manager.setAnimation(0, name, loop);
+                p.manager.setAnimation(trackIndex, name, loop);
             }
         });
     }
@@ -211,6 +211,15 @@ export class ComparisonPanel {
 
     setAllPaused(paused: boolean): void {
         this.projects.forEach(p => p.manager.setPaused(paused));
+    }
+
+    setTrackLoop(trackIndex: number, loop: boolean): void {
+        this.projects.forEach(p => p.manager.setTrackLoop(trackIndex, loop));
+    }
+
+    clearTrack(trackIndex: number): void {
+        this.lastTracks.delete(trackIndex);
+        this.projects.forEach(p => p.manager.clearTrack(trackIndex));
     }
 
     private build(): void {
@@ -265,20 +274,32 @@ export class ComparisonPanel {
         const anims = manager.getAnimationNames();
         const skins = manager.getSkinNames();
 
-        // Animation: prefer tracked lastAnimation, fall back to reading from first project's live state
-        const targetAnim = this.lastAnimation?.name
-            ?? this.projects[0]?.manager.getCurrentTrackInfo(0)?.name;
-        const targetLoop = this.lastAnimation?.loop ?? true;
-
-        if (targetAnim && anims.includes(targetAnim)) {
-            manager.setAnimation(0, targetAnim, targetLoop);
-            // Sync playback position to first existing project
-            const sourceTime = this.projects[0]?.manager.getCurrentTrackInfo(0)?.time;
-            if (sourceTime !== undefined && sourceTime > 0) {
-                manager.seekTo(0, sourceTime);
+        // Apply all tracked per-track animations
+        if (this.lastTracks.size > 0) {
+            this.lastTracks.forEach(({ name, loop }, trackIndex) => {
+                if (anims.includes(name)) {
+                    manager.setAnimation(trackIndex, name, loop);
+                    // Sync playback position on track 0 to first existing project
+                    if (trackIndex === 0) {
+                        const sourceTime = this.projects[0]?.manager.getCurrentTrackInfo(0)?.time;
+                        if (sourceTime !== undefined && sourceTime > 0) {
+                            manager.seekTo(0, sourceTime);
+                        }
+                    }
+                }
+            });
+        } else {
+            // Fall back to reading from first project's live state
+            const targetAnim = this.projects[0]?.manager.getCurrentTrackInfo(0)?.name;
+            if (targetAnim && anims.includes(targetAnim)) {
+                manager.setAnimation(0, targetAnim, true);
+                const sourceTime = this.projects[0]?.manager.getCurrentTrackInfo(0)?.time;
+                if (sourceTime !== undefined && sourceTime > 0) {
+                    manager.seekTo(0, sourceTime);
+                }
+            } else if (anims.length > 0) {
+                manager.setAnimation(0, anims[0], true);
             }
-        } else if (anims.length > 0) {
-            manager.setAnimation(0, anims[0], true);
         }
 
         // Speed

@@ -10,6 +10,8 @@ export class ComparisonControlPanel {
     private pauseBtn!: HTMLButtonElement;
     private speedSlider!: HTMLInputElement;
     private speedValue!: HTMLElement;
+    private trackSelect!: HTMLSelectElement;
+    private loopToggle!: HTMLInputElement;
     private isPaused = false;
 
     constructor(comparisonPanel: ComparisonPanel) {
@@ -45,6 +47,46 @@ export class ComparisonControlPanel {
             });
             pauseRow.appendChild(this.pauseBtn);
             body.appendChild(pauseRow);
+
+            // Track + Loop row
+            const trackRow = document.createElement('div');
+            trackRow.className = 'sv-control-row';
+            trackRow.style.marginTop = '4px';
+
+            const trackLabel = document.createElement('span');
+            trackLabel.className = 'sv-control-label';
+            trackLabel.textContent = 'Track';
+            trackRow.appendChild(trackLabel);
+
+            this.trackSelect = document.createElement('select');
+            this.trackSelect.className = 'sv-select';
+            this.trackSelect.style.width = '52px';
+            for (let i = 0; i < 12; i++) {
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = String(i);
+                this.trackSelect.appendChild(opt);
+            }
+            trackRow.appendChild(this.trackSelect);
+
+            const loopLabel = document.createElement('label');
+            loopLabel.className = 'sv-toggle';
+            loopLabel.style.marginLeft = '8px';
+            this.loopToggle = document.createElement('input');
+            this.loopToggle.type = 'checkbox';
+            this.loopToggle.checked = true;
+            const loopTrack = document.createElement('span');
+            loopTrack.className = 'sv-toggle-track';
+            loopLabel.appendChild(this.loopToggle);
+            loopLabel.appendChild(loopTrack);
+            trackRow.appendChild(loopLabel);
+
+            const loopText = document.createElement('span');
+            loopText.className = 'sv-control-label';
+            loopText.textContent = 'Loop';
+            trackRow.appendChild(loopText);
+
+            body.appendChild(trackRow);
 
             // Speed slider
             const speedRow = document.createElement('div');
@@ -187,7 +229,9 @@ export class ComparisonControlPanel {
         const row = document.createElement('div');
         row.className = 'sv-compare-anim-row';
         row.addEventListener('click', () => {
-            this.comparisonPanel.playAnimation(name);
+            const track = parseInt(this.trackSelect.value);
+            const loop = this.loopToggle.checked;
+            this.comparisonPanel.playAnimation(name, track, loop);
             // Highlight active
             this.animListEl.querySelectorAll('.sv-compare-anim-row').forEach(r =>
                 r.classList.remove('active')

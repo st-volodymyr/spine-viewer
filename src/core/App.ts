@@ -11,6 +11,7 @@ import { ComparisonPanel } from '../ui/panels/ComparisonPanel';
 import { ComparisonControlPanel } from '../ui/panels/ComparisonControlPanel';
 import { QuickAccessPanel } from '../ui/panels/QuickAccessPanel';
 import { ActiveTracksBar } from '../ui/panels/ActiveTracksBar';
+import { CompareTracksBar } from '../ui/panels/CompareTracksBar';
 import { PerformancePanel } from '../ui/panels/PerformancePanel';
 import { loadSpineFiles, createFileInput, setupDragDrop } from '../services/FileLoader';
 import { parseSpineFiles } from '../services/SpineParser';
@@ -241,8 +242,9 @@ export class App {
         this.quickAccessEl = quickAccess.element;
         this.comparisonControlEl = comparisonControls.element;
 
-        // Active tracks bar below viewport
+        // Active tracks bar below viewport (single mode) + compare tracks bar (comparison mode)
         new ActiveTracksBar(this.layout.viewportTracksBar, this.stateManager, this.spineManager);
+        new CompareTracksBar(this.layout.viewportTracksBar, this.comparisonPanel);
     }
 
     private buildPerformancePanel(): void {
