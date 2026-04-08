@@ -14,6 +14,8 @@ export class AtlasInspectorPanel {
     private textureImages: Map<string, HTMLImageElement> = new Map();
     private selectedRegion: AtlasRegion | null = null;
     private usedRegionNames: Set<string> = new Set();
+    private showUnusedOnly = false;
+    private unusedFilterBtn!: HTMLButtonElement;
 
     private compareAtlases: Map<string, { atlas: ParsedAtlas; textures: SpineFileSet['textures'] }> = new Map();
     private isCompareMode = false;
@@ -171,13 +173,29 @@ export class AtlasInspectorPanel {
         this.compareSection.appendChild(this.compareSectionBody);
         this.element.appendChild(this.compareSection);
 
-        // Search
+        // Search + unused filter row
+        const filterRow = document.createElement('div');
+        filterRow.style.cssText = 'display:flex;gap:4px;align-items:center;margin:4px 0';
         this.searchInput = document.createElement('input');
         this.searchInput.className = 'sv-tree-search';
         this.searchInput.placeholder = 'Filter regions...';
-        this.searchInput.style.margin = '4px 0';
+        this.searchInput.style.flex = '1';
+        this.searchInput.style.margin = '0';
         this.searchInput.addEventListener('input', () => this.renderRegionList());
-        this.element.appendChild(this.searchInput);
+        filterRow.appendChild(this.searchInput);
+
+        this.unusedFilterBtn = document.createElement('button');
+        this.unusedFilterBtn.className = 'sv-btn sv-btn-sm';
+        this.unusedFilterBtn.textContent = 'Unused';
+        this.unusedFilterBtn.title = 'Show only unused atlas regions';
+        this.unusedFilterBtn.style.cssText = 'flex-shrink:0;display:none';
+        this.unusedFilterBtn.addEventListener('click', () => {
+            this.showUnusedOnly = !this.showUnusedOnly;
+            this.unusedFilterBtn.classList.toggle('sv-btn-active', this.showUnusedOnly);
+            this.renderRegionList();
+        });
+        filterRow.appendChild(this.unusedFilterBtn);
+        this.element.appendChild(filterRow);
 
         // View full atlas button
         const viewBtn = document.createElement('button');
@@ -249,8 +267,15 @@ export class AtlasInspectorPanel {
         const unusedCount = this.usedRegionNames.size > 0
             ? regions.filter(r => !this.usedRegionNames.has(r.name)).length
             : 0;
-        if (this.usedRegionNames.size > 0) {
+        const hasUsageData = this.usedRegionNames.size > 0;
+        if (hasUsageData) {
             stats.push(['Unused', String(unusedCount)]);
+        }
+        // Show/hide unused filter button
+        this.unusedFilterBtn.style.display = hasUsageData && unusedCount > 0 ? '' : 'none';
+        if (!hasUsageData || unusedCount === 0) {
+            this.showUnusedOnly = false;
+            this.unusedFilterBtn.classList.remove('sv-btn-active');
         }
 
         stats.forEach(([label, value]) => {
@@ -290,9 +315,12 @@ export class AtlasInspectorPanel {
         if (!this.atlasData) return;
 
         const filter = this.searchInput.value.toLowerCase();
-        const regions = filter
+        let regions = filter
             ? this.atlasData.regions.filter(r => r.name.toLowerCase().includes(filter))
             : this.atlasData.regions;
+        if (this.showUnusedOnly && this.usedRegionNames.size > 0) {
+            regions = regions.filter(r => !this.usedRegionNames.has(r.name));
+        }
 
         // Group by page
         const byPage = new Map<string, AtlasRegion[]>();
@@ -334,11 +362,12 @@ export class AtlasInspectorPanel {
                 if (this.selectedRegion === region) row.classList.add('selected');
 
                 if (this.usedRegionNames.size > 0) {
-                    const dot = document.createElement('span');
                     const isUsed = this.usedRegionNames.has(region.name);
-                    dot.style.cssText = `width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${isUsed ? 'var(--sv-success)' : 'var(--sv-text-muted)'}`;
-                    dot.title = isUsed ? 'Referenced in skin' : 'Not referenced in any skin';
+                    const dot = document.createElement('span');
+                    dot.style.cssText = `width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${isUsed ? 'var(--sv-success)' : 'var(--sv-error)'}`;
+                    dot.title = isUsed ? 'Used in project' : 'Not used in any skin or animation';
                     row.appendChild(dot);
+                    if (!isUsed) row.style.opacity = '0.55';
                 }
 
                 const name = document.createElement('span');
