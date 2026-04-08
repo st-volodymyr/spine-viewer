@@ -22,6 +22,8 @@ export class Viewport {
             autoDensity: true,
         });
 
+        (globalThis as any).__PIXI_APP__ = this.app;
+
         this.wrapper = new Container();
         this.wrapper.sortableChildren = true;
         this.app.stage.addChild(this.wrapper);
