@@ -17,6 +17,15 @@ interface PlaceholderEntry {
 
 type Entries = Map<string, PlaceholderEntry>;
 
+type SlotStatus = {
+    accessible: boolean;   // bone exists and not scaled to zero in setup pose
+    alphaZero: boolean;    // slot color alpha is explicitly 0 in setup
+    hasSetupAttachment: boolean;
+    resolvable: boolean;
+    setupAttachmentName: string | null;
+    reason: string;        // diagnostic detail when not accessible
+};
+
 interface CompareProjectRef {
     name: string;
     manager: SpineManager;
@@ -26,6 +35,10 @@ export class PlaceholderPanel {
     element: HTMLElement;
     private listEl!: HTMLElement;
     private showAllToggle!: HTMLInputElement;
+    private searchInput!: HTMLInputElement;
+    private searchTerm = '';
+    private managerIds = new Map<SpineManager, string>();
+    private managerIdSeq = 0;
 
     // Single-mode entries
     private entries: Entries = new Map();
@@ -43,6 +56,7 @@ export class PlaceholderPanel {
         this.build();
 
         eventBus.on('project:change', () => this.refresh());
+        eventBus.on('project:update', () => this.refreshStatuses());
         eventBus.on('mode:change', (mode: string) => {
             this.isCompareMode = mode === 'comparison';
             this.refresh();
@@ -98,6 +112,41 @@ export class PlaceholderPanel {
         info.textContent = 'Toggle a slot to show its marker. Set a label or image to overlay content at that position.';
         this.element.appendChild(info);
 
+        const legend = document.createElement('div');
+        legend.style.cssText = 'font-size:var(--sv-font-size-sm);color:var(--sv-text-muted);padding:2px 0 6px;display:flex;flex-direction:column;gap:2px';
+        const legendItems: Array<[string, string, string]> = [
+            ['\u25CF', '#4caf50', 'accessible + has a resolvable setup attachment'],
+            ['\u25CB', '#4caf50', 'accessible + empty in setup pose (placeholder ready for content)'],
+            ['\u26A0', '#e0a020', 'has a setup attachment but it\u2019s not found in the current skin'],
+            ['\u2715', '#e05050', 'not accessible (ancestor bone scaled to 0, or slot alpha 0)'],
+        ];
+        legendItems.forEach(([icon, color, text]) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:6px';
+            const ic = document.createElement('span');
+            ic.textContent = icon;
+            ic.style.cssText = `color:${color};width:14px;text-align:center;font-size:10px`;
+            const tx = document.createElement('span');
+            tx.textContent = text;
+            row.appendChild(ic);
+            row.appendChild(tx);
+            legend.appendChild(row);
+        });
+        this.element.appendChild(legend);
+
+        const searchRow = document.createElement('div');
+        searchRow.style.cssText = 'display:flex;gap:4px;align-items:center;padding:2px 0 6px';
+        this.searchInput = document.createElement('input');
+        this.searchInput.type = 'search';
+        this.searchInput.placeholder = 'Filter slots\u2026';
+        this.searchInput.style.cssText = 'flex:1;padding:2px 6px;border:1px solid var(--sv-border);border-radius:var(--sv-radius);background:var(--sv-bg-input);color:var(--sv-text-primary);font-size:var(--sv-font-size-sm)';
+        this.searchInput.addEventListener('input', () => {
+            this.searchTerm = this.searchInput.value.trim().toLowerCase();
+            this.applyFilter();
+        });
+        searchRow.appendChild(this.searchInput);
+        this.element.appendChild(searchRow);
+
         this.listEl = document.createElement('div');
         this.element.appendChild(this.listEl);
     }
@@ -121,6 +170,114 @@ export class PlaceholderPanel {
             const slotNames = this.stateManager.projectA?.slotNames ?? [];
             slotNames.forEach(slotName => this.buildSlotRow(slotName, this.spineManager, this.entries, this.listEl));
         }
+        this.applyFilter();
+    }
+
+    private managerId(manager: SpineManager): string {
+        let id = this.managerIds.get(manager);
+        if (!id) {
+            id = `m${this.managerIdSeq++}`;
+            this.managerIds.set(manager, id);
+        }
+        return id;
+    }
+
+    private managerById(id: string): SpineManager | null {
+        for (const [mgr, mid] of this.managerIds) if (mid === id) return mgr;
+        return null;
+    }
+
+    private computeSlotStatus(slotName: string, manager: SpineManager): SlotStatus | null {
+        const spine = manager.spine;
+        if (!spine) return null;
+        const skeleton: any = spine.skeleton;
+        const slot = skeleton.findSlot(slotName);
+        if (!slot) return null;
+        const data = slot.data;
+        const setupAttachmentName: string | null = data.attachmentName ?? null;
+        const hasSetupAttachment = !!setupAttachmentName;
+        let resolvable = false;
+        if (hasSetupAttachment) {
+            try {
+                const att = skeleton.getAttachment(data.index, setupAttachmentName);
+                resolvable = !!att;
+            } catch { resolvable = false; }
+        }
+        const rawAlpha = data.color?.a;
+        const alphaZero = typeof rawAlpha === 'number' && rawAlpha === 0;
+        // Walk the bone's setup-pose ancestry; if any bone has setup scale 0, the
+        // slot would render at an unreachable point.
+        let accessible = true;
+        let reason = '';
+        const bone = slot.bone;
+        if (!bone) { accessible = false; reason = 'slot has no bone'; }
+        else {
+            let b: any = bone;
+            while (b) {
+                const bd = b.data;
+                if (bd && (bd.scaleX === 0 || bd.scaleY === 0)) {
+                    accessible = false;
+                    reason = `bone "${bd.name}" has setup scale 0`;
+                    break;
+                }
+                b = b.parent;
+            }
+        }
+        if (accessible && alphaZero) { accessible = false; reason = 'slot setup alpha is 0'; }
+        return { accessible, alphaZero, hasSetupAttachment, resolvable, setupAttachmentName, reason };
+    }
+
+    private applySlotStatus(row: HTMLElement, badge: HTMLElement, nameEl: HTMLElement, slotName: string, manager: SpineManager): void {
+        const status = this.computeSlotStatus(slotName, manager);
+        let icon = '';
+        let color = '';
+        let tooltip = '';
+        let dimmed = false;
+        if (!status) {
+            icon = '?'; color = 'var(--sv-text-muted)'; tooltip = 'Slot not found';
+            dimmed = true;
+        } else if (!status.accessible) {
+            icon = '\u2715'; color = '#e05050';
+            tooltip = `Not accessible in setup pose — ${status.reason}`;
+            dimmed = true;
+        } else if (status.hasSetupAttachment && !status.resolvable) {
+            icon = '\u26A0'; color = '#e0a020';
+            tooltip = `Setup attachment "${status.setupAttachmentName}" not found in current skin`;
+        } else if (status.hasSetupAttachment) {
+            icon = '\u25CF'; color = '#4caf50';
+            tooltip = `Accessible — setup attachment: ${status.setupAttachmentName}`;
+        } else {
+            icon = '\u25CB'; color = '#4caf50';
+            tooltip = 'Accessible — empty in setup pose (placeholder ready for content)';
+        }
+        badge.textContent = icon;
+        badge.style.color = color;
+        badge.title = tooltip;
+        nameEl.style.opacity = dimmed ? '0.55' : '1';
+        row.dataset.accessible = status?.accessible ? '1' : '0';
+    }
+
+    private refreshStatuses(): void {
+        const rows = this.listEl.querySelectorAll<HTMLElement>('[data-slot-name]');
+        rows.forEach(row => {
+            const slotName = row.dataset.slotName!;
+            const mgrId = row.dataset.managerId;
+            const manager = mgrId ? this.managerById(mgrId) : this.spineManager;
+            if (!manager) return;
+            const badge = row.querySelector<HTMLElement>('.sv-placeholder-badge');
+            const nameEl = badge?.nextElementSibling as HTMLElement | null;
+            if (badge && nameEl) this.applySlotStatus(row, badge, nameEl, slotName, manager);
+        });
+        this.applyFilter();
+    }
+
+    private applyFilter(): void {
+        const term = this.searchTerm;
+        const rows = this.listEl.querySelectorAll<HTMLElement>('[data-slot-name]');
+        rows.forEach(row => {
+            const slotName = row.dataset.slotName!.toLowerCase();
+            row.style.display = !term || slotName.includes(term) ? '' : 'none';
+        });
     }
 
     private buildProjectSection(projectName: string, manager: SpineManager, entries: Entries): void {
@@ -157,10 +314,17 @@ export class PlaceholderPanel {
     private buildSlotRow(slotName: string, manager: SpineManager, entries: Entries, container: HTMLElement): void {
         const wrapper = document.createElement('div');
         wrapper.style.borderBottom = '1px solid var(--sv-border-light)';
+        wrapper.dataset.slotName = slotName;
+        wrapper.dataset.managerId = this.managerId(manager);
 
         const mainRow = document.createElement('div');
         mainRow.className = 'sv-control-row';
         mainRow.style.padding = '2px 0';
+
+        const badge = document.createElement('span');
+        badge.className = 'sv-placeholder-badge';
+        badge.style.cssText = 'flex-shrink:0;width:14px;text-align:center;font-size:10px;line-height:14px';
+        mainRow.appendChild(badge);
 
         const nameEl = document.createElement('span');
         nameEl.style.flex = '1';
@@ -171,6 +335,8 @@ export class PlaceholderPanel {
         nameEl.title = slotName;
         nameEl.textContent = slotName;
         mainRow.appendChild(nameEl);
+
+        this.applySlotStatus(wrapper, badge, nameEl, slotName, manager);
 
         const toggleLabel = document.createElement('label');
         toggleLabel.className = 'sv-toggle';
