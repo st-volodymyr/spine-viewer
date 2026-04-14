@@ -16,8 +16,8 @@ html, body, #app {
 
 .sv-app {
     display: grid;
-    grid-template-rows: var(--sv-toolbar-height) 1fr var(--sv-bottombar-height);
-    grid-template-columns: var(--sv-panel-width) 1fr var(--sv-panel-width);
+    grid-template-rows: var(--sv-toolbar-height) minmax(0, 1fr) var(--sv-bottombar-height);
+    grid-template-columns: var(--sv-panel-width) minmax(0, 1fr) var(--sv-panel-width);
     width: 100%;
     height: 100%;
 }
@@ -29,6 +29,8 @@ html, body, #app {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-width: 0;
+    min-height: 0;
 }
 
 /* Toolbar spans all columns */
@@ -59,6 +61,8 @@ html, body, #app {
     position: relative;
     background: var(--sv-bg-viewport);
     overflow: hidden;
+    min-width: 0;
+    min-height: 0;
 }
 
 .sv-viewport canvas {

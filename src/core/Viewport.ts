@@ -42,8 +42,18 @@ export class Viewport {
             this.drawGrid();
         });
 
+        let prevSize = { width: this.app.screen.width, height: this.app.screen.height };
         const resizeObserver = new ResizeObserver(() => {
             this.app.resize();
+            const { width, height } = this.app.screen;
+            const dx = (width - prevSize.width) / 2;
+            const dy = (height - prevSize.height) / 2;
+            if (dx || dy) {
+                this.wrapper.x += dx;
+                this.wrapper.y += dy;
+                this.stateManager.setViewport({ panX: this.wrapper.x, panY: this.wrapper.y });
+            }
+            prevSize = { width, height };
             this.drawGrid();
         });
         resizeObserver.observe(canvas.parentElement!);
