@@ -40,6 +40,8 @@ export class App {
         this.viewport = new Viewport(this.layout.canvas, this.stateManager);
         this.spineManager = new SpineManager(this.viewport);
 
+        (window as any).app = this;
+
         // Build UI panels
         this.buildToolbarButtons();
         this.buildPanels();
