@@ -195,11 +195,11 @@ html, body, #app {
 .sv-track-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 5px 12px;
+    gap: 10px;
+    padding: 8px 14px;
     border-bottom: 1px solid var(--sv-border-light);
     font-size: var(--sv-font-size);
-    min-height: 34px;
+    min-height: 44px;
 }
 
 .sv-track-row:last-child {
@@ -227,10 +227,10 @@ html, body, #app {
     border-radius: var(--sv-radius);
     color: var(--sv-text-secondary);
     cursor: pointer;
-    font-size: var(--sv-font-size-sm);
-    padding: 2px 8px;
-    height: 24px;
-    min-width: 28px;
+    font-size: var(--sv-font-size);
+    padding: 4px 10px;
+    height: 30px;
+    min-width: 34px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -249,26 +249,68 @@ html, body, #app {
 }
 
 .sv-track-row-progress {
-    width: 60px;
-    height: 4px;
+    flex: 1;
+    min-width: 140px;
+    height: 10px;
     background: var(--sv-border);
-    border-radius: 2px;
+    border-radius: 5px;
     overflow: hidden;
-    flex-shrink: 0;
+    cursor: pointer;
+    /* Larger hit area for dragging without enlarging the visual bar. */
+    box-sizing: content-box;
+    padding: 6px 0;
+    background-clip: content-box;
+}
+
+.sv-track-row-progress:hover {
+    background-color: var(--sv-text-muted);
+    background-clip: content-box;
 }
 
 .sv-track-row-progress-fill {
     height: 100%;
     background: var(--sv-accent);
-    border-radius: 2px;
-    transition: width 0.1s linear;
+    border-radius: 5px;
+    transition: width 0.08s linear;
+    pointer-events: none;
+}
+
+/* Heatmap variant: the groove shows per-timeline cost; the fill becomes a
+   translucent playhead overlay so the heat colors stay readable underneath. */
+.sv-track-row-progress--heat {
+    position: relative;
+    height: 14px;
+    padding: 0;
+    border-radius: 4px;
+    background: var(--sv-bg-secondary);
+    background-clip: border-box;
+}
+
+.sv-track-row-heat {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.sv-track-row-progress-fill--overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: rgba(99, 102, 241, 0.18);
+    border-right: 2px solid var(--sv-accent);
+    border-radius: 0;
+    box-sizing: border-box;
 }
 
 .sv-track-row-time {
     font-family: var(--sv-font-mono);
-    font-size: var(--sv-font-size-sm);
-    color: var(--sv-text-muted);
-    min-width: 80px;
+    font-size: var(--sv-font-size);
+    color: var(--sv-text-secondary);
+    min-width: 110px;
+    text-align: right;
     flex-shrink: 0;
 }
 

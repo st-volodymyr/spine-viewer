@@ -215,7 +215,7 @@ export class SkeletonInspectorPanel {
 
         // If animation, play it
         if (node.data?.type === 'animation') {
-            this.activeManager.setAnimation(0, node.label, true);
+            this.activeManager.setAnimation(0, node.label, false);
         }
 
         // If skin, apply it

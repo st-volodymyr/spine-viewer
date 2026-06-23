@@ -12,6 +12,8 @@ export class PerformancePanel {
     private visible = false;
     private fpsHistory: number[] = [];
     private isCompareMode = false;
+    private renderAccum = 0;        // ms accumulator to throttle DOM updates
+    private bars: HTMLElement[] = []; // reused sparkline bar nodes
 
     private fpsEl!: HTMLElement;
     private avgEl!: HTMLElement;
@@ -95,6 +97,13 @@ export class PerformancePanel {
 
         this.chart = document.createElement('div');
         this.chart.style.cssText = 'display:flex;align-items:flex-end;gap:1px;height:30px;margin-top:4px;background:var(--sv-bg-secondary);border-radius:var(--sv-radius);padding:2px';
+        // Pre-create the 60 sparkline bars once; tick() only mutates their style.
+        for (let i = 0; i < 60; i++) {
+            const bar = document.createElement('div');
+            bar.style.cssText = 'flex:1;height:0;background:#4a9a5a;border-radius:1px 1px 0 0;min-width:0';
+            this.bars.push(bar);
+            this.chart.appendChild(bar);
+        }
         panel.appendChild(this.chart);
 
         // Warnings section
@@ -138,12 +147,22 @@ export class PerformancePanel {
     }
 
     private tick(): void {
+        // Sample FPS every frame (cheap) so history is accurate…
         const fps = this.viewport.ticker.FPS;
         this.fpsHistory.push(fps);
         if (this.fpsHistory.length > 60) this.fpsHistory.shift();
 
         if (!this.visible) return;
 
+        // …but only touch the DOM ~5×/sec. Rebuilding the panel every frame made
+        // the profiler itself a frame-time sink.
+        this.renderAccum += this.viewport.ticker.deltaMS;
+        if (this.renderAccum < 200) return;
+        this.renderAccum = 0;
+        this.render(fps);
+    }
+
+    private render(fps: number): void {
         const avg = this.fpsHistory.reduce((s, v) => s + v, 0) / this.fpsHistory.length;
         const min = Math.min(...this.fpsHistory);
         const max = Math.max(...this.fpsHistory);
@@ -239,16 +258,17 @@ export class PerformancePanel {
         const vramMB = (vramBytes / 1048576).toFixed(1);
         this.vramEl.textContent = vramBytes > 0 ? `~${vramMB} MB` : '\u2014';
 
-        // Sparkline
-        this.chart.innerHTML = '';
-        const barW = Math.max(1, Math.floor((this.chart.clientWidth - 4) / 60));
-        this.fpsHistory.forEach(f => {
-            const bar = document.createElement('div');
-            const pct = Math.min(100, (f / 60) * 100);
-            const color = f >= 55 ? '#4a9a5a' : f >= 30 ? '#c08a30' : '#c05050';
-            bar.style.cssText = `width:${barW}px;height:${pct}%;background:${color};border-radius:1px 1px 0 0;flex-shrink:0`;
-            this.chart.appendChild(bar);
-        });
+        // Sparkline — mutate the pre-created bars instead of rebuilding the list.
+        for (let i = 0; i < this.bars.length; i++) {
+            const bar = this.bars[i];
+            const f = this.fpsHistory[i];
+            if (f === undefined) {
+                bar.style.height = '0';
+                continue;
+            }
+            bar.style.height = `${Math.min(100, (f / 60) * 100)}%`;
+            bar.style.background = f >= 55 ? '#4a9a5a' : f >= 30 ? '#c08a30' : '#c05050';
+        }
 
         // Warnings
         this.warningsEl.innerHTML = '';

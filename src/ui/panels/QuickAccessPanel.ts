@@ -1,7 +1,14 @@
 import { eventBus } from '../../core/EventBus';
 import type { StateManager } from '../../core/StateManager';
-import type { SpineManager } from '../../core/SpineManager';
+import type { SpineManager, DebugDrawOptions } from '../../core/SpineManager';
 import type { SpineEventData } from '../../core/SpineManager';
+import type { AnimationCost, Severity } from '../../services/AnimationProfiler';
+
+const SEVERITY_COLOR: Record<Severity, string> = {
+    ok: '#4a9a5a',
+    watch: '#c08a30',
+    heavy: '#c05050',
+};
 
 interface EventTrigger {
     id: number;
@@ -22,11 +29,25 @@ export class QuickAccessPanel {
     private trackPills: HTMLButtonElement[] = [];
     private currentAnim = '';
     private currentTrack = 0;
+    private animCosts = new Map<string, AnimationCost>();
 
-    // Skins
+    // Skins. Single-select by default; opt into combining N skins via the toggle.
     private skinList!: HTMLElement;
     private skinBadge!: HTMLElement;
-    private currentSkin = '';
+    private skinHint!: HTMLElement;
+    private multiSkinToggle!: HTMLInputElement;
+    private multiSkin = false;
+    private currentSkins = new Set<string>();
+
+    // Debug draw
+    private debug: DebugDrawOptions = {
+        bones: false,
+        meshes: false,
+        boundingBoxes: false,
+        regions: false,
+        clipping: false,
+        paths: false,
+    };
 
     // Playback
     private pauseBtn!: HTMLButtonElement;
@@ -58,12 +79,14 @@ export class QuickAccessPanel {
 
         eventBus.on('project:change', () => {
             this.currentAnim = '';
-            this.currentSkin = '';
+            this.currentSkins.clear();
             this.currentTrack = 0;
             this.isPaused = false;
             this.queue = [];
             this.triggers = [];
             this.refresh();
+            // Re-apply persisted debug-draw selection to the freshly created spine.
+            this.spineManager.setDebugOptions(this.debug);
         });
 
         eventBus.on('spine:event', (data: SpineEventData) => {
@@ -74,6 +97,27 @@ export class QuickAccessPanel {
                     this.updateTrackPills();
                 }
             });
+        });
+
+        // Keyboard-driven loop toggles (L / Shift+L).
+        eventBus.on('loop:toggle-current', () => this.toggleLoopCurrent());
+        eventBus.on('loop:toggle-all', () => this.toggleLoopAll());
+
+        // Pose reset (button or R key) clears active animations → drop the stale chip.
+        eventBus.on('pose:reset', () => {
+            this.currentAnim = '';
+            if (this.isPaused) {
+                this.isPaused = false;
+                this.spineManager.setPaused(false);
+                this.pauseBtn.textContent = '⏸ Pause';
+            }
+            this.refresh();
+        });
+
+        // Pause state changed elsewhere (e.g. frame-step shortcut).
+        eventBus.on('playback:paused-changed', (paused: boolean) => {
+            this.isPaused = paused;
+            this.pauseBtn.textContent = paused ? '▶ Resume' : '⏸ Pause';
         });
     }
 
@@ -178,6 +222,43 @@ export class QuickAccessPanel {
         skinBody.className = 'sv-section-body';
         skinBody.style.padding = '0';
 
+        // Combine toggle — off by default (single-select). On = layer multiple skins.
+        const combineRow = document.createElement('div');
+        combineRow.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 10px 3px';
+        const combineWrap = document.createElement('label');
+        combineWrap.className = 'sv-toggle';
+        this.multiSkinToggle = document.createElement('input');
+        this.multiSkinToggle.type = 'checkbox';
+        this.multiSkinToggle.checked = false;
+        const combineTrack = document.createElement('span');
+        combineTrack.className = 'sv-toggle-track';
+        combineWrap.appendChild(this.multiSkinToggle);
+        combineWrap.appendChild(combineTrack);
+        combineRow.appendChild(combineWrap);
+        const combineLbl = document.createElement('span');
+        combineLbl.style.cssText = 'font-size:var(--sv-font-size-sm);color:var(--sv-text-secondary)';
+        combineLbl.textContent = 'Combine skins';
+        combineRow.appendChild(combineLbl);
+        this.multiSkinToggle.addEventListener('change', () => {
+            this.multiSkin = this.multiSkinToggle.checked;
+            // Leaving combine mode: collapse to a single active skin.
+            if (!this.multiSkin && this.currentSkins.size > 1) {
+                const keep = [...this.currentSkins][0];
+                this.currentSkins.clear();
+                if (keep) this.currentSkins.add(keep);
+                this.spineManager.setSkins([...this.currentSkins]);
+                this.stateManager.updateProjectA({ currentSkin: keep ?? '' });
+            }
+            this.updateSkinHint();
+            this.refresh();
+        });
+        skinBody.appendChild(combineRow);
+
+        this.skinHint = document.createElement('div');
+        this.skinHint.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 10px 2px';
+        skinBody.appendChild(this.skinHint);
+        this.updateSkinHint();
+
         this.skinList = document.createElement('div');
         this.skinList.style.maxHeight = '160px';
         this.skinList.style.overflowY = 'auto';
@@ -208,11 +289,10 @@ export class QuickAccessPanel {
             loopWrap.className = 'sv-toggle';
             this.loopToggle = document.createElement('input');
             this.loopToggle.type = 'checkbox';
-            this.loopToggle.checked = true;
+            this.loopToggle.checked = false; // Default: play once (matches reference viewers).
+            // Live: change loop on the currently playing track without restarting it.
             this.loopToggle.addEventListener('change', () => {
-                if (this.currentAnim) {
-                    this.spineManager.setAnimation(this.currentTrack, this.currentAnim, this.loopToggle.checked);
-                }
+                this.spineManager.setTrackLoop(this.currentTrack, this.loopToggle.checked);
             });
             const loopTrack = document.createElement('span');
             loopTrack.className = 'sv-toggle-track';
@@ -255,7 +335,10 @@ export class QuickAccessPanel {
             resetBtn.className = 'sv-btn sv-btn-sm';
             resetBtn.style.marginTop = '4px';
             resetBtn.textContent = 'Reset Pose';
-            resetBtn.addEventListener('click', () => this.spineManager.resetPose());
+            resetBtn.addEventListener('click', () => {
+                this.spineManager.resetPose();
+                eventBus.emit('pose:reset');
+            });
             body.appendChild(resetBtn);
         });
         this.element.appendChild(playSection);
@@ -411,6 +494,46 @@ export class QuickAccessPanel {
             body.appendChild(scaleRow);
         });
         this.element.appendChild(viewSection);
+
+        // ── DEBUG DRAW ───────────────────────────────────────────────
+        const debugSection = this.makeSection('DEBUG DRAW', (body) => {
+            const hint = document.createElement('div');
+            hint.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 0 6px';
+            hint.textContent = 'Overlay skeleton internals (Spine 4.2).';
+            body.appendChild(hint);
+
+            const grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:2px 8px';
+
+            const options: { key: keyof DebugDrawOptions; label: string }[] = [
+                { key: 'bones', label: 'Bones' },
+                { key: 'meshes', label: 'Meshes' },
+                { key: 'boundingBoxes', label: 'Bounds' },
+                { key: 'regions', label: 'Regions' },
+                { key: 'clipping', label: 'Clipping' },
+                { key: 'paths', label: 'Paths' },
+            ];
+
+            options.forEach(({ key, label }) => {
+                const row = document.createElement('label');
+                row.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:var(--sv-font-size-sm)';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = this.debug[key];
+                cb.addEventListener('change', () => {
+                    this.debug[key] = cb.checked;
+                    this.spineManager.setDebugOptions(this.debug);
+                });
+                row.appendChild(cb);
+                const txt = document.createElement('span');
+                txt.textContent = label;
+                row.appendChild(txt);
+                grid.appendChild(row);
+            });
+
+            body.appendChild(grid);
+        });
+        this.element.appendChild(debugSection);
     }
 
     private makeSection(title: string, build: (body: HTMLElement) => void): HTMLElement {
@@ -426,6 +549,12 @@ export class QuickAccessPanel {
         build(body);
         section.appendChild(body);
         return section;
+    }
+
+    private updateSkinHint(): void {
+        this.skinHint.textContent = this.multiSkin
+            ? 'Click to toggle — selected skins are combined.'
+            : 'Click to select one skin.';
     }
 
     private updateTrackPills(): void {
@@ -458,6 +587,23 @@ export class QuickAccessPanel {
         this.pauseBtn.textContent = this.isPaused ? '\u25B6 Resume' : '\u23F8 Pause';
         const btn = document.getElementById('sv-pause-btn');
         if (btn) btn.textContent = this.isPaused ? 'Resume' : 'Pause';
+    }
+
+    private toggleLoopCurrent(): void {
+        const next = !this.loopToggle.checked;
+        this.loopToggle.checked = next;
+        this.spineManager.setTrackLoop(this.currentTrack, next);
+        eventBus.emit('toast', { message: `Track ${this.currentTrack} loop: ${next ? 'on' : 'off'}` });
+    }
+
+    private toggleLoopAll(): void {
+        const tracks = this.spineManager.getAllActiveTracks();
+        if (tracks.length === 0) return;
+        // If every active track is looping, turn them all off; otherwise turn all on.
+        const next = !tracks.every(t => t.loop);
+        tracks.forEach(t => this.spineManager.setTrackLoop(t.trackIndex, next));
+        this.loopToggle.checked = next;
+        eventBus.emit('toast', { message: `All tracks loop: ${next ? 'on' : 'off'}` });
     }
 
     private playQueue(): void {
@@ -544,7 +690,7 @@ export class QuickAccessPanel {
         });
     }
 
-    private renderItem(container: HTMLElement, name: string, isActive: boolean, onSelect: () => void): void {
+    private renderItem(container: HTMLElement, name: string, isActive: boolean, onSelect: () => void, cost?: AnimationCost): void {
         const row = document.createElement('div');
         row.style.display = 'flex';
         row.style.alignItems = 'center';
@@ -554,6 +700,19 @@ export class QuickAccessPanel {
         row.style.background = isActive ? 'var(--sv-accent)' : 'transparent';
         row.style.color = isActive ? '#fff' : 'var(--sv-text-primary)';
         row.style.fontSize = 'var(--sv-font-size)';
+
+        // Cost severity pip (animations only) — immediate "which ones are heavy".
+        if (cost) {
+            const pip = document.createElement('span');
+            const color = SEVERITY_COLOR[cost.severity];
+            const hollow = cost.severity === 'ok';
+            pip.style.cssText = `width:8px;height:8px;border-radius:2px;flex-shrink:0;border:1px solid ${color};background:${hollow ? 'transparent' : color}`;
+            const lines = cost.drivers.length
+                ? cost.drivers.map(d => `• ${d.label}`).join('\n')
+                : 'No notable cost drivers';
+            pip.title = `${cost.severity.toUpperCase()} (cost ${cost.score})\n${lines}`;
+            row.appendChild(pip);
+        }
 
         const dot = document.createElement('span');
         dot.style.cssText = `width:7px;height:7px;border-radius:50%;flex-shrink:0;border:1px solid ${isActive ? 'rgba(255,255,255,0.7)' : 'var(--sv-text-muted)'};background:${isActive ? 'rgba(255,255,255,0.9)' : 'transparent'}`;
@@ -600,14 +759,21 @@ export class QuickAccessPanel {
             return;
         }
 
+        // Static cost profile → severity pips next to each animation.
+        this.animCosts.clear();
+        this.spineManager.profile()?.animations.forEach(a => this.animCosts.set(a.name, a));
+
         this.animBadge.textContent = String(project.animationNames.length);
-        this.skinBadge.textContent = String(project.skinNames.length);
+        this.skinBadge.textContent = this.currentSkins.size > 1
+            ? `${this.currentSkins.size}/${project.skinNames.length}`
+            : String(project.skinNames.length);
 
         if (!this.currentAnim && project.animationNames.length > 0) {
             this.currentAnim = project.animationNames[0];
         }
-        if (!this.currentSkin) {
-            this.currentSkin = project.currentSkin || (project.skinNames[0] ?? '');
+        if (this.currentSkins.size === 0) {
+            const initial = project.currentSkin || project.skinNames[0];
+            if (initial) this.currentSkins.add(initial);
         }
 
         // Populate trigger selects
@@ -669,14 +835,27 @@ export class QuickAccessPanel {
                     this.pauseBtn.textContent = '\u23F8 Pause';
                 }
                 this.refresh();
-            });
+            }, this.animCosts.get(name));
         });
 
         project.skinNames.forEach(name => {
-            this.renderItem(this.skinList, name, name === this.currentSkin, () => {
-                this.currentSkin = name;
-                this.spineManager.setSkin(name);
-                this.stateManager.updateProjectA({ currentSkin: name });
+            this.renderItem(this.skinList, name, this.currentSkins.has(name), () => {
+                if (this.multiSkin) {
+                    // Combine mode: toggle membership — selected skins layer into one.
+                    if (this.currentSkins.has(name)) {
+                        this.currentSkins.delete(name);
+                    } else {
+                        this.currentSkins.add(name);
+                    }
+                } else {
+                    // Single-select: clicking the active skin clears it, otherwise replaces.
+                    const wasOnly = this.currentSkins.has(name) && this.currentSkins.size === 1;
+                    this.currentSkins.clear();
+                    if (!wasOnly) this.currentSkins.add(name);
+                }
+                const names = [...this.currentSkins];
+                this.spineManager.setSkins(names);
+                this.stateManager.updateProjectA({ currentSkin: names[0] ?? '' });
                 this.refresh();
             });
         });

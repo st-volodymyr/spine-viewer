@@ -134,6 +134,20 @@ export class Viewport {
         return this.app.ticker;
     }
 
+    /**
+     * Render a display object to a standalone canvas (transparent background),
+     * preserving its current pose/scale. Returns null if extraction fails.
+     */
+    captureObjectCanvas(target: any): HTMLCanvasElement | null {
+        if (!target) return null;
+        try {
+            return this.app.renderer.extract.canvas(target) as HTMLCanvasElement;
+        } catch (err) {
+            console.error('Frame capture failed:', err);
+            return null;
+        }
+    }
+
     destroy(): void {
         this.app.destroy(true);
     }

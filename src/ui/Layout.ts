@@ -173,6 +173,14 @@ export class Layout {
         perfBtn.title = 'Performance stats';
         this.toolbar.appendChild(perfBtn);
 
+        // Export PNG button
+        const exportPngBtn = document.createElement('button');
+        exportPngBtn.className = 'sv-btn sv-btn-sm';
+        exportPngBtn.id = 'sv-export-png-btn';
+        exportPngBtn.textContent = 'PNG';
+        exportPngBtn.title = 'Export current frame as PNG (transparent background)';
+        this.toolbar.appendChild(exportPngBtn);
+
         // Project name chip
         this.projectNameEl = document.createElement('span');
         this.projectNameEl.className = 'sv-project-chip';

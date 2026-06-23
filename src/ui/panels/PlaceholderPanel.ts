@@ -8,11 +8,9 @@ import type { Container } from '@electricelephants/pixi-ext';
 interface PlaceholderEntry {
     slotName: string;
     marker: Graphics | null;
-    markerRafId: number | null;
     contentSprite: Sprite | null;
     contentText: Text | null;
-    rafId: number | null;
-    container: Container | null;
+    container: Container | null;  // when set, content is parented to the slot (no manual follow)
 }
 
 type Entries = Map<string, PlaceholderEntry>;
@@ -47,6 +45,10 @@ export class PlaceholderPanel {
     private compareEntries: Map<SpineManager, Entries> = new Map();
     private compareProjects: CompareProjectRef[] = [];
     private isCompareMode = false;
+
+    // Single shared rAF loop that follows every marker/floating-content to its
+    // slot bone — replaces the previous one-rAF-chain-per-marker approach.
+    private tickHandle: number | null = null;
 
     constructor(
         private stateManager: StateManager,
@@ -338,6 +340,23 @@ export class PlaceholderPanel {
 
         this.applySlotStatus(wrapper, badge, nameEl, slotName, manager);
 
+        // Copy the slot name to the clipboard (saves manual text selection).
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'sv-btn sv-btn-sm';
+        copyBtn.style.cssText = 'flex-shrink:0;padding:0 6px;min-width:24px;font-size:11px;line-height:18px';
+        copyBtn.textContent = '⎘';
+        copyBtn.title = `Copy "${slotName}"`;
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(slotName).then(() => {
+                const prev = copyBtn.textContent;
+                copyBtn.textContent = '✓';
+                eventBus.emit('toast', { message: `Copied "${slotName}"` });
+                setTimeout(() => { copyBtn.textContent = prev; }, 1000);
+            }).catch(() => {});
+        });
+        mainRow.appendChild(copyBtn);
+
         const toggleLabel = document.createElement('label');
         toggleLabel.className = 'sv-toggle';
         toggleLabel.style.flexShrink = '0';
@@ -463,7 +482,7 @@ export class PlaceholderPanel {
 
     private getOrCreateEntryIn(slotName: string, entries: Entries): PlaceholderEntry {
         if (!entries.has(slotName)) {
-            entries.set(slotName, { slotName, marker: null, markerRafId: null, contentSprite: null, contentText: null, rafId: null, container: null });
+            entries.set(slotName, { slotName, marker: null, contentSprite: null, contentText: null, container: null });
         }
         return entries.get(slotName)!;
     }
@@ -506,20 +525,50 @@ export class PlaceholderPanel {
         spine.addChild(g);
 
         entry.marker = g;
-        // Keep updating position so marker follows the animation
-        entry.markerRafId = this.startMarkerPositionUpdate(slotName, g, manager, entries);
+        // The shared loop keeps the marker glued to the bone as the animation plays.
+        this.ensureTicking();
     }
 
-    private startMarkerPositionUpdate(slotName: string, g: Graphics, manager: SpineManager, entries: Entries): number {
-        const update = () => {
-            const spine = manager.spine;
-            if (!spine) return;
-            const slot = spine.skeleton.findSlot(slotName);
-            if (slot?.bone) g.position.set(slot.bone.worldX, slot.bone.worldY);
-            const entry = entries.get(slotName);
-            if (entry?.marker) entry.markerRafId = requestAnimationFrame(update);
+    // ── Shared position-follow loop ──────────────────────────────────────────
+
+    private ensureTicking(): void {
+        if (this.tickHandle === null && this.needsTicking()) {
+            this.tickHandle = requestAnimationFrame(this.tickPositions);
+        }
+    }
+
+    private needsTicking(): boolean {
+        const has = (entries: Entries): boolean => {
+            for (const e of entries.values()) {
+                if (e.marker || ((e.contentSprite || e.contentText) && !e.container)) return true;
+            }
+            return false;
         };
-        return requestAnimationFrame(update);
+        if (has(this.entries)) return true;
+        for (const entries of this.compareEntries.values()) if (has(entries)) return true;
+        return false;
+    }
+
+    private tickPositions = (): void => {
+        this.applyFollow(this.entries, this.spineManager);
+        for (const [mgr, entries] of this.compareEntries) this.applyFollow(entries, mgr);
+        this.tickHandle = this.needsTicking() ? requestAnimationFrame(this.tickPositions) : null;
+    };
+
+    private applyFollow(entries: Entries, manager: SpineManager): void {
+        const spine = manager.spine;
+        if (!spine) return;
+        entries.forEach(entry => {
+            const slot = spine.skeleton.findSlot(entry.slotName);
+            const bone = slot?.bone;
+            if (!bone) return;
+            entry.marker?.position.set(bone.worldX, bone.worldY);
+            // Content parented to the slot container is positioned by Pixi already.
+            if (!entry.container) {
+                entry.contentSprite?.position.set(bone.worldX, bone.worldY);
+                entry.contentText?.position.set(bone.worldX, bone.worldY);
+            }
+        });
     }
 
     private setTextContentFor(slotName: string, text: string, style: { fontSize: number; fill: string; stroke?: string; strokeThickness?: number; fontFamily?: string; fontWeight?: string; fontStyle?: string }, manager: SpineManager, entries: Entries): void {
@@ -548,16 +597,15 @@ export class PlaceholderPanel {
             entry.container = slotContainer;
         } else {
             spine.addChild(pixiText);
-            entry.rafId = this.startPositionUpdateFor(slotName, pixiText, manager, entries);
         }
         entry.contentText = pixiText;
+        this.ensureTicking();
     }
 
     private setImageContentFor(slotName: string, dataUrl: string, manager: SpineManager, entries: Entries): void {
         const entry = this.getOrCreateEntryIn(slotName, entries);
         if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
         if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
-        if (entry.rafId !== null) { cancelAnimationFrame(entry.rafId); entry.rafId = null; }
 
         const spine = manager.spine;
         if (!spine) return;
@@ -575,23 +623,11 @@ export class PlaceholderPanel {
                 entry.container = slotContainer;
             } else {
                 spine.addChild(sprite);
-                entry.rafId = this.startPositionUpdateFor(slotName, sprite, manager, entries);
             }
             entry.contentSprite = sprite;
+            this.ensureTicking();
         };
         img.src = dataUrl;
-    }
-
-    private startPositionUpdateFor(slotName: string, obj: { position: { set(x: number, y: number): void } }, manager: SpineManager, entries: Entries): number {
-        const update = () => {
-            const spine = manager.spine;
-            if (!spine) return;
-            const slot = spine.skeleton.findSlot(slotName);
-            if (slot?.bone) obj.position.set(slot.bone.worldX, slot.bone.worldY);
-            const entry = entries.get(slotName);
-            if (entry) entry.rafId = requestAnimationFrame(update);
-        };
-        return requestAnimationFrame(update);
     }
 
     private clearSlotContentIn(slotName: string, entries: Entries): void {
@@ -599,16 +635,15 @@ export class PlaceholderPanel {
         if (!entry) return;
         if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
         if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
-        if (entry.rafId !== null) { cancelAnimationFrame(entry.rafId); entry.rafId = null; }
     }
 
     private hideSlotIn(slotName: string, entries: Entries): void {
         const entry = entries.get(slotName);
         if (!entry) return;
-        if (entry.markerRafId !== null) { cancelAnimationFrame(entry.markerRafId); entry.markerRafId = null; }
         if (entry.marker) { entry.marker.destroy(); entry.marker = null; }
         this.clearSlotContentIn(slotName, entries);
         entries.delete(slotName);
+        // The shared loop self-stops on its next frame once nothing needs following.
     }
 
     private clearEntriesMap(entries: Entries): void {

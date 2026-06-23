@@ -10,6 +10,7 @@ import { EventDebugPanel } from '../ui/panels/EventDebugPanel';
 import { ComparisonPanel } from '../ui/panels/ComparisonPanel';
 import { ComparisonControlPanel } from '../ui/panels/ComparisonControlPanel';
 import { QuickAccessPanel } from '../ui/panels/QuickAccessPanel';
+import { ProfilerPanel } from '../ui/panels/ProfilerPanel';
 import { ActiveTracksBar } from '../ui/panels/ActiveTracksBar';
 import { CompareTracksBar } from '../ui/panels/CompareTracksBar';
 import { PerformancePanel } from '../ui/panels/PerformancePanel';
@@ -17,6 +18,7 @@ import { loadSpineFiles, createFileInput, setupDragDrop } from '../services/File
 import { parseSpineFiles } from '../services/SpineParser';
 import { detectSpineVersion } from '../services/SpineVersionDetector';
 import { parseAtlasText } from '../services/AtlasParser';
+import { PerfSampler } from '../services/PerfSampler';
 import type { SpineFileSet } from '../types/spine';
 import type { SpineProjectState } from '../types/state';
 
@@ -31,6 +33,7 @@ export class App {
     private comparisonPanel!: ComparisonPanel;
     private wasPausedBeforeCompare = false;
     private lastAtlasPayload: { atlas: any; textures: any; usedRegionNames: Set<string> } | null = null;
+    private perfSampler = new PerfSampler();
 
     constructor(container: HTMLElement) {
         this.stateManager = new StateManager();
@@ -61,6 +64,11 @@ export class App {
             this.viewport.centerWrapper();
             this.viewport.wrapper.scale.set(1, 1);
             this.stateManager.setViewport({ zoom: 1 });
+        });
+
+        // Generic toast channel so any panel can surface a message.
+        eventBus.on('toast', (payload: { message: string; type?: 'info' | 'success' | 'warning' | 'error' }) => {
+            this.showToast(payload.message, payload.type ?? 'info');
         });
 
         // Mode switching: hide/show main spine, swap left panel, manage compare state
@@ -133,6 +141,10 @@ export class App {
         // FPS and progress updates
         this.viewport.ticker.add(() => this.updateBottomBar());
 
+        // Runtime cost sampling → timeline heatmap under the scrubber.
+        this.viewport.ticker.add(() => this.sampleFrameCost());
+        eventBus.on('project:change', () => this.perfSampler.reset());
+
         // Keyboard shortcuts
         this.setupKeyboardShortcuts();
     }
@@ -163,6 +175,7 @@ export class App {
                             this.stateManager.updateProjectA({ paused });
                             const btn = document.getElementById('sv-pause-btn');
                             if (btn) btn.textContent = paused ? 'Resume' : 'Pause';
+                            eventBus.emit('playback:paused-changed', paused);
                         }
                     }
                     break;
@@ -170,6 +183,7 @@ export class App {
                 case 'KeyR':
                     if (!e.ctrlKey && !e.metaKey) {
                         this.spineManager.resetPose();
+                        eventBus.emit('pose:reset');
                     }
                     break;
                 case 'Equal':
@@ -194,6 +208,25 @@ export class App {
                     eventBus.emit('viewport:reset');
                     break;
                 }
+                case 'KeyL': {
+                    if (this.stateManager.mode === 'comparison') break;
+                    e.preventDefault();
+                    eventBus.emit(e.shiftKey ? 'loop:toggle-all' : 'loop:toggle-current');
+                    break;
+                }
+                case 'ArrowLeft':
+                case 'ArrowRight': {
+                    if (this.stateManager.mode === 'comparison') break;
+                    e.preventDefault();
+                    const track = this.stateManager.projectA?.currentTrack ?? 0;
+                    this.spineManager.stepFrame(track, e.code === 'ArrowRight' ? 1 : -1);
+                    // Reflect the forced pause in the UI.
+                    this.stateManager.updateProjectA({ paused: true });
+                    const btn = document.getElementById('sv-pause-btn');
+                    if (btn) btn.textContent = 'Resume';
+                    eventBus.emit('playback:paused-changed', true);
+                    break;
+                }
             }
         });
     }
@@ -206,6 +239,12 @@ export class App {
                 const input = createFileInput(true, (files) => this.handleFiles(files));
                 input.click();
             });
+        }
+
+        // Export current frame as PNG
+        const exportPngBtn = document.getElementById('sv-export-png-btn');
+        if (exportPngBtn) {
+            exportPngBtn.addEventListener('click', () => this.exportCurrentFramePNG());
         }
 
         // "Add Project" button (toolbar, compare mode)
@@ -227,6 +266,9 @@ export class App {
         const placeholderPanel = new PlaceholderPanel(this.stateManager, this.spineManager);
         this.layout.addTab('placeholders', 'Slots', placeholderPanel.element);
 
+        const profilerPanel = new ProfilerPanel(this.stateManager, this.spineManager);
+        this.layout.addTab('profiler', 'Profiler', profilerPanel.element);
+
         const eventPanel = new EventDebugPanel();
         this.layout.addTab('events', 'Events', eventPanel.element);
 
@@ -245,7 +287,7 @@ export class App {
         this.comparisonControlEl = comparisonControls.element;
 
         // Active tracks bar below viewport (single mode) + compare tracks bar (comparison mode)
-        new ActiveTracksBar(this.layout.viewportTracksBar, this.stateManager, this.spineManager);
+        new ActiveTracksBar(this.layout.viewportTracksBar, this.stateManager, this.spineManager, this.perfSampler);
         new CompareTracksBar(this.layout.viewportTracksBar, this.comparisonPanel);
     }
 
@@ -355,13 +397,13 @@ export class App {
                 this.dropZone.classList.add('sv-hidden');
             }
 
-            // Set default skin and first animation
+            // Set default skin, but DON'T auto-play — leave the skeleton in its
+            // setup pose so the user explicitly picks an animation (matches the
+            // behaviour of reference viewers and avoids a surprise loop on load).
             if (project.skinNames.length > 0) {
                 this.spineManager.setSkin(project.skinNames[0]);
             }
-            if (project.animationNames.length > 0) {
-                this.spineManager.setAnimation(0, project.animationNames[0], true);
-            }
+            this.spineManager.resetPose();
 
             // Update version in bottom bar
             this.layout.updateVersion(
@@ -426,6 +468,60 @@ export class App {
             this.layout.updateProgress(0);
             this.layout.updateAnimTime('');
         }
+    }
+
+    /**
+     * Attribute this frame's render cost to the playing animation at its current
+     * timeline position. Draw calls (batch breaks) are the primary signal since
+     * they spike with clipping/blend/draw-order even when FPS holds; frame time
+     * is the fallback. Only samples while actually playing in single mode.
+     */
+    private sampleFrameCost(): void {
+        if (this.stateManager.mode === 'comparison') return;
+        if (this.stateManager.projectA?.paused) return;
+
+        const renderer = this.viewport.app.renderer as any;
+        const drawCalls = renderer._drawCallCount ?? renderer.batch?._drawCallCount;
+        const cost = (typeof drawCalls === 'number' && drawCalls > 0)
+            ? drawCalls
+            : this.viewport.ticker.deltaMS;
+
+        for (const t of this.spineManager.getAllActiveTracks()) {
+            if (t.duration <= 0) continue;
+            this.perfSampler.sample(t.name, t.time / t.duration, cost);
+        }
+    }
+
+    private exportCurrentFramePNG(): void {
+        const spine = this.spineManager.spine;
+        if (!spine) {
+            this.showToast('Load a skeleton first', 'warning');
+            return;
+        }
+        const canvas = this.viewport.captureObjectCanvas(spine);
+        if (!canvas) {
+            this.showToast('Frame capture failed', 'error');
+            return;
+        }
+        const project = this.stateManager.projectA;
+        const track = this.spineManager.getCurrentTrackInfo(project?.currentTrack ?? 0);
+        const base = (project?.name || 'spine').replace(/\.[^.]+$/, '');
+        const anim = track ? `_${track.name}_${track.time.toFixed(2)}s` : '_setup';
+        const fileName = `${base}${anim}.png`;
+
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                this.showToast('Frame capture failed', 'error');
+                return;
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.click();
+            URL.revokeObjectURL(url);
+            this.showToast(`Exported ${fileName}`, 'success');
+        }, 'image/png');
     }
 
     private toastContainer: HTMLElement | null = null;

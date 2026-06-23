@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@electricelephants/pixi-ext": "1.1.17",
+    "@esotericsoftware/spine-pixi-v7": "^4.2.106",
     "@pixi-spine/all-4.1": "^4.0.6",
     "jszip": "^3.10.1"
   },
