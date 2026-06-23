@@ -16,12 +16,13 @@ No test runner or linter is configured; `tsc` (run by `npm run build`) is the co
 ## Tech Stack
 - **Vite + TypeScript** (strict, ES2020, path alias `@/*` → `src/*`)
 - **PixiJS 7.4.x** via `@electricelephants/pixi-ext@1.1.17` — provides `SpineElement`, spine type exports (incl. `Skin`), and auto-registered atlas/skeleton loaders
-- **`@esotericsoftware/spine-pixi-v7`** (4.2 runtime) — explicit dependency so `SpineDebugRenderer` and the spine-core timeline/attachment classes are version-aligned (not relying on hoisting)
+- **`@esotericsoftware/spine-pixi-v7`** (4.2 runtime) — explicit dependency for the spine-core timeline/attachment classes used by the profiler
 - **`@pixi-spine/all-4.1`** — fallback runtime for Spine 4.1 skeletons (`SpineManager.createSpine41`)
 - **JSZip** for `.spine` archive extraction
 - **`@types/node`** dev dependency — required for `path` and `__dirname` in `vite.config.ts`
 - **Deployment**: GitHub Pages (`base: '/spine-viewer/'` in vite.config)
 - **tsconfig.json** `include` covers `src/**/*.ts` + `vite.config.ts` (so the IDE TS server types the config file correctly)
+- **`vite.config.ts` `resolve.dedupe` + `optimizeDeps.include`** force a SINGLE copy of `@esotericsoftware/spine-core`/`spine-pixi-v7`/`pixi.js`. Without this, the bundler can create two spine-core copies (one via pixi-ext, one via our direct imports), breaking cross-copy `instanceof` checks. We avoid `instanceof` in our own code (see `SkeletonDebug`), but dedupe keeps the runtime's internal checks sound.
 
 ## Architecture
 
@@ -45,6 +46,9 @@ No test runner or linter is configured; `tsc` (run by `npm run build`) is the co
   - `pose:reset` — Reset Pose ran (button or `R`); panels drop the stale active-animation chip
   - `loop:toggle-current` / `loop:toggle-all` — keyboard loop toggles (`L` / `Shift+L`)
   - `toast` — generic `{ message, type? }` channel; App shows a toast
+  - `viewport:zoom` — set viewport zoom from the VIEW slider (kept in sync with wheel via `viewport:change`)
+  - `reference:image` / `reference:opacity` — reference/mockup image behind the skeleton
+  - `onion:toggle` / `onion:config` — onion-skin enable + `{ before, after, step }`
 - **`StateManager`** holds canonical state; mutations emit events via EventBus
 
 ### File loading pipeline
@@ -66,13 +70,17 @@ StateManager.setProjectA(project)       → EventBus 'project:change'
 ### Spine rendering
 - **`Viewport`** stage hierarchy: `stage → gridGraphics (zIndex -1000) → wrapper (Container)`. SpineElement is added to `wrapper`.
 - Pan/zoom manipulates `wrapper` transform. Wheel zoom clamped to 0.05–10×.
-- `SpineManager` wraps SpineElement API: `setAnimation`, `addAnimation` (queuing), `setAnimationsList`, `setSkin`, `setSkins` (combine N skins into one — 4.2), `setSpeed`, `setPaused`, `setScale`, `setFlip`, `resetPose` (clears all tracks, then setup pose — so it isn't immediately re-applied), `clearTrack`, `seekToPaused`/`stepFrame` (scrub & frame-step while paused), `setDebugOptions` (attaches `SpineDebugRenderer`), and `profile()` (memoized static cost analysis).
+- `SpineManager` wraps SpineElement API: `setAnimation`, `addAnimation` (queuing), `setAnimationsList`, `setSkin`, `setSkins` (combine N skins into one — 4.2), `setSpeed`, `setPaused`, `setScale`, `setFlip`, `setDefaultMix` (crossfade duration), `resetPose` (clears all tracks, then setup pose — so it isn't immediately re-applied), `clearTrack`, `seekToPaused`/`stepFrame` (scrub & frame-step while paused), `cloneSpine` (detached copy for ghosts/stress-test), `setDebugOptions` (drives `SkeletonDebug`), and `profile()` (memoized static cost analysis).
 - **Track time**: looping tracks report `trackTime % duration`; finished one-shots clamp at `duration` (matching `AnimationState.getAnimationTime`) so progress bars freeze instead of cycling.
 
-### Performance tooling
-- **`AnimationProfiler`** (`src/services/AnimationProfiler.ts`) — static, machine-independent cost analysis of `SkeletonData`. Duck-types timelines/attachments (works across 4.1/4.2, survives minification) to attribute cost drivers (clipping, mesh deforms, non-normal blend modes, draw-order keys, attachment swaps) per animation → `OK`/`Watch`/`Heavy`. Exposed via `SpineManager.profile()` (memoized, reset on load).
+### Performance & animator tooling
+- **`AnimationProfiler`** (`src/services/AnimationProfiler.ts`) — static, machine-independent cost analysis of `SkeletonData`. Duck-types timelines/attachments (works across 4.1/4.2, survives minification) to attribute cost drivers per animation → `OK`/`Watch`/`Heavy`. Includes **deep clipping analysis** (per-mask vertex count, convexity, clipped slot/triangle counts) and **Spine Metrics parity** (bones, timelines, vertex transforms, constraints). Exposed via `SpineManager.profile()` (memoized, reset on load).
 - **`PerfSampler`** (`src/services/PerfSampler.ts`) — records peak render cost (draw calls, frame-time fallback) per timeline bucket, per animation. Fed each frame by `App.sampleFrameCost`; drives the scrubber heatmap.
-- **Surfaces**: severity dots in `QuickAccessPanel`'s animation list, the **Profiler** right tab (`ProfilerPanel`), the timeline heatmap in the single-mode tracks bar, and the live **Perf HUD** (`PerformancePanel`, DOM-throttled to ~5 Hz).
+- **`SkeletonDebug`** (`src/services/SkeletonDebug.ts`) — our own debug overlay (bones/meshes/bounds/regions/clipping/paths). Draws from world vertices via duck-typing — **no `instanceof`** — so every flag works regardless of spine-runtime copy duplication (the bundled `SpineDebugRenderer` only drew bones because its `instanceof` checks failed across module copies). Parented to the spine; redrawn each frame from `SpineManager`'s ticker callback.
+- **`OnionSkin`** (`src/services/OnionSkin.ts`) — ghost poses before/after the current frame (clone spines via `cloneSpine`, set to offset trackTimes). Opt-in via the ONION SKIN panel section.
+- **`StressTest`** (`src/services/StressTest.ts`) — tiles N skeleton clones to find the FPS ceiling; driven by the STRESS TEST slider in the Perf HUD.
+- **Surfaces**: severity dots in `QuickAccessPanel`'s animation list, the **Profiler** right tab (`ProfilerPanel`) with per-mask clipping breakdown, the timeline heatmap in the single-mode tracks bar, and the live **Perf HUD** (`PerformancePanel`, DOM-throttled to ~5 Hz).
+- **Reference image**: `Viewport.setReferenceImage` draws a world-space mockup behind the skeleton (VIEW section controls; routed via `reference:image`/`reference:opacity` events).
 
 ### UI panels
 All panels follow the same pattern:
@@ -85,7 +93,7 @@ class XyzPanel {
 }
 ```
 - **Right tabs** (`App.buildPanels`): Inspect (SkeletonInspector), Atlas, Slots (PlaceholderPanel), Profiler (ProfilerPanel), Events (debug log), Compare
-- **Left panel**: `QuickAccessPanel` (animations w/ severity dots, skins, playback, queue, event triggers, debug-draw) in single mode; `ComparisonControlPanel` in compare mode (toggled by `mode:change`)
+- **Left panel**: `QuickAccessPanel` in single mode; `ComparisonControlPanel` in compare mode (toggled by `mode:change`). QuickAccessPanel sections: animations (w/ severity dots), skins (single-select + Combine toggle), playback (loop off by default), queue, event triggers, VIEW (zoom slider mirroring wheel + Mix/crossfade + reference image), DEBUG DRAW, ONION SKIN.
 - **Tracks bar** (below the viewport): a shared **`TrackBar`** component (`src/ui/panels/TrackBar.ts`) driven by a `TrackController`. `ActiveTracksBar` (single mode) wires it to `SpineManager` and enables scrub/frame-step/heatmap; `CompareTracksBar` wires it to `ComparisonPanel` (no scrub/heatmap). Heatmap CSS lives under `.sv-track-row-progress--heat` in `layout.css`.
 - **`PlaceholderPanel`**: slot accessibility badges, copy-name buttons, and text/image overlays positioned by a single shared rAF follow-loop (one loop total, not one per marker).
 - **`TreeView`** (`src/ui/TreeView.ts`): reusable, searchable, collapsible tree; `setData(nodes)` replaces content
@@ -93,7 +101,7 @@ class XyzPanel {
 - Note: `AnimationPanel.ts` was removed — `QuickAccessPanel` is the live animation/skin UI.
 
 ### Comparison mode
-`ComparisonEngine` computes diffs (animations/skins/slots/bones only in A or B) and has sync methods (`syncAnimation`, `syncSkin`, `syncSpeed`, `syncPause`). The infrastructure supports `projectA` + `projectB` in state, though the UI surfaces this only in the Compare tab.
+`ComparisonEngine` computes diffs (animations/skins/slots/bones only in A or B) and has sync methods (`syncAnimation`, `syncSkin`, `syncSpeed`, `syncPause`). It also computes an attachment-level **`getReskinDiff`** (Reskin Overview) — per `slot / attachment`, which attachments are missing on either side and which resolve to a different atlas region or type — rendered as a collapsible section in the Compare tab with severity badges. The infrastructure supports `projectA` + `projectB` in state, though the UI surfaces this only in the Compare tab.
 
 ## Key conventions
 - CSS custom properties use `--sv-*` prefix (`src/styles/variables.css`)

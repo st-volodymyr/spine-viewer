@@ -1,6 +1,51 @@
 import type { SpineManager } from '../core/SpineManager';
 import type { ComparisonDiff, StructuredDiff, AnimationDiffEntry } from '../types/state';
 
+/** One attachment entry, keyed by "slot / attachmentName", with its atlas region + type. */
+interface AttachmentInfo { region: string; type: string }
+
+export interface ReskinMismatch {
+    key: string;
+    regionDiffers: boolean;
+    typeDiffers: boolean;
+    a: AttachmentInfo;
+    b: AttachmentInfo;
+}
+
+export interface ReskinDiff {
+    onlyA: string[];          // attachments present in A but missing in B (or vice-versa)
+    onlyB: string[];
+    mismatches: ReskinMismatch[]; // same slot+attachment, different region or type
+    matched: number;
+}
+
+function attachmentType(att: any): string {
+    if ('endSlot' in att) return 'clipping';
+    if (Array.isArray(att.triangles)) return 'mesh';
+    if (Array.isArray(att.lengths) || att.closed !== undefined) return 'path';
+    if (att.uvs !== undefined || att.region !== undefined || att.width !== undefined) return 'region';
+    return 'other';
+}
+
+/** Aggregate every skin's attachments for a skeleton, keyed by "slot / attachment". */
+function collectAttachments(data: any): Map<string, AttachmentInfo> {
+    const map = new Map<string, AttachmentInfo>();
+    if (!data) return map;
+    const slots: any[] = data.slots ?? [];
+    const slotName = (i: number) => slots[i]?.name ?? `slot${i}`;
+    for (const skin of data.skins ?? []) {
+        const entries = typeof skin.getAttachments === 'function' ? skin.getAttachments() : [];
+        for (const e of entries) {
+            const att = e?.attachment;
+            if (!att) continue;
+            const key = `${slotName(e.slotIndex)} / ${e.name}`;
+            if (map.has(key)) continue;
+            map.set(key, { region: att.path ?? att.name ?? e.name, type: attachmentType(att) });
+        }
+    }
+    return map;
+}
+
 export class ComparisonEngine {
     private managers: SpineManager[] = [];
     syncEnabled = true;
@@ -140,6 +185,41 @@ export class ComparisonEngine {
             eventsOnlyB: diff.eventsOnlyB,
             eventsShared: diff.eventsShared,
         };
+    }
+
+    /**
+     * Attachment-level "reskin" audit between two projects: which attachments are
+     * missing on either side, and which share a slot+name but resolve to a
+     * different atlas region or attachment type.
+     */
+    getReskinDiff(idxA: number, idxB: number): ReskinDiff {
+        const mgrA = this.managers[idxA];
+        const mgrB = this.managers[idxB];
+        if (!mgrA || !mgrB) return { onlyA: [], onlyB: [], mismatches: [], matched: 0 };
+
+        const a = collectAttachments(mgrA.spineData);
+        const b = collectAttachments(mgrB.spineData);
+
+        const onlyA: string[] = [];
+        const onlyB: string[] = [];
+        const mismatches: ReskinMismatch[] = [];
+        let matched = 0;
+
+        for (const [key, infoA] of a) {
+            const infoB = b.get(key);
+            if (!infoB) { onlyA.push(key); continue; }
+            const regionDiffers = infoA.region !== infoB.region;
+            const typeDiffers = infoA.type !== infoB.type;
+            if (regionDiffers || typeDiffers) mismatches.push({ key, regionDiffers, typeDiffers, a: infoA, b: infoB });
+            else matched++;
+        }
+        for (const key of b.keys()) {
+            if (!a.has(key)) onlyB.push(key);
+        }
+
+        onlyA.sort(); onlyB.sort();
+        mismatches.sort((x, y) => x.key.localeCompare(y.key));
+        return { onlyA, onlyB, mismatches, matched };
     }
 
     getFullDiffSummary(): string {

@@ -11,14 +11,18 @@ Supports **Spine 4.1 and 4.2** (both JSON and binary `.skel`).
 - **No auto-play** — a freshly loaded skeleton sits in its setup pose until you pick an animation. Loop is **off by default** (one-shot).
 - **Scrubbing & frame-step** — drag any track's progress groove to scrub; ◀ ▶ buttons or `←`/`→` step one frame. Time is shown in milliseconds.
 - **Skins** — single-select by default; toggle **Combine skins** to layer several into one.
-- **Debug draw** — overlay bones, meshes, bounding boxes, regions, clipping and paths (Spine 4.2).
+- **Mix / crossfade** — set a default mix duration so switching animations crossfades.
+- **Onion skinning (ghosting)** — translucent ghost poses before/after the current frame to judge timing, spacing and motion arcs.
+- **Reference image** — load a mockup behind the skeleton (world space, with opacity) to match poses/proportions.
+- **Debug draw** — overlay bones, meshes, bounding boxes, regions, clipping and paths via a custom duck-typed renderer (works on 4.1 and 4.2).
 - **Performance for animators:**
-  - **Profiler tab** — static, machine-independent cost analysis. Each animation gets an `OK / Watch / Heavy` severity (also shown as an inline dot in the left list) with a breakdown of what drives the cost: clipping, mesh deforms, non-normal blend modes, draw-order changes, attachment swaps. A summary card shows the skeleton's constant overhead.
+  - **Profiler tab** — static, machine-independent cost analysis. Each animation gets an `OK / Watch / Heavy` severity (also an inline dot in the left list) with a breakdown of its drivers: clipping, mesh deforms, blend modes, draw-order changes, attachment swaps, constraints. The summary mirrors Spine's Metrics view (bones, timelines, vertex transforms, constraints) and includes a **per-mask clipping breakdown** (vertex count, convexity, clipped slot/triangle counts).
   - **Timeline heatmap** — while an animation plays, the scrubber groove colors green→red by measured render cost (draw calls / frame time) per timeline position, so you can see *where* in the animation the engine works hardest.
+  - **Stress test** — clone the skeleton N times and watch the FPS ceiling.
   - **Perf HUD** (`Perf` button) — live FPS, frame time, draw calls, bone/slot counts, JS heap, VRAM estimate, and warnings.
 - **Inspectors** — skeleton tree (bones/slots/skins/events/animations/constraints), atlas inspector, and a **Slots/Placeholders** panel with accessibility badges, copy-name buttons, and the ability to overlay custom text/images at a slot.
 - **PNG export** — export the current frame with a transparent background.
-- **A/B comparison mode** — load multiple projects and compare animations/skins/slots side by side.
+- **A/B comparison mode** — load multiple projects and compare animations/skins/slots side by side, plus a **Reskin Overview** that audits attachments at the region level (missing or remapped attachments between projects, with severity).
 - **Light/dark theme**, pan/zoom canvas with grid, and a configurable background color.
 
 ## Keyboard shortcuts

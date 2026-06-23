@@ -1,6 +1,6 @@
 import { SpineElement, Skin } from '@electricelephants/pixi-ext';
 import type { SkeletonData, TrackEntry, AnimationStateListener } from '@electricelephants/pixi-ext';
-import { SpineDebugRenderer } from '@esotericsoftware/spine-pixi-v7';
+import { SkeletonDebug } from '../services/SkeletonDebug';
 import { Spine as Spine41 } from '@pixi-spine/all-4.1';
 import type { SkeletonData as SkeletonData41 } from '@pixi-spine/all-4.1';
 import { eventBus } from './EventBus';
@@ -37,11 +37,13 @@ export class SpineManager {
     private viewport: Viewport;
     private projectName: string = '';
     private listener: AnimationStateListener | null = null;
-    private debugRenderer: SpineDebugRenderer | null = null;
+    private debug: SkeletonDebug | null = null;
     private profileCache: ProfileResult | null = null;
 
     constructor(viewport: Viewport) {
         this.viewport = viewport;
+        // Redraw the debug overlay each frame from the live skeleton pose.
+        this.viewport.ticker.add(() => this.debug?.update());
     }
 
     /** Static animation cost analysis for the current skeleton (memoized). */
@@ -71,6 +73,18 @@ export class SpineManager {
         this.viewport.wrapper.addChild(spine41);
         this.attachListeners();
         return spine41;
+    }
+
+    /**
+     * Create a detached spine of the same skeleton (NOT added to the viewport and
+     * with no event listeners). Caller owns it — used for ghosts and stress-test
+     * clones. Shares cached skeleton/atlas data and textures with the main spine.
+     */
+    cloneSpine(): AnySpine | null {
+        if (!this.spine) return null;
+        if (isSpineElement(this.spine)) return new SpineElement(this.projectName);
+        const data = (this.spine as Spine41).spineData;
+        return data ? new Spine41(data as any) : null;
     }
 
     private attachListeners(): void {
@@ -294,6 +308,13 @@ export class SpineManager {
         if (current) current.loop = loop;
     }
 
+    /** Default crossfade (mix) duration in seconds applied when switching animations. */
+    setDefaultMix(seconds: number): void {
+        if (!this.spine) return;
+        const data = (this.spine.state as any)?.data;
+        if (data) data.defaultMix = Math.max(0, seconds);
+    }
+
     isPaused(): boolean {
         if (!this.spine) return false;
         return (this.spine as any).autoUpdate === false;
@@ -333,32 +354,25 @@ export class SpineManager {
         this.seekToPaused(trackIndex, next);
     }
 
-    /** Attach/update or detach the Spine debug renderer (bones, meshes, bounds, …). 4.2 only. */
+    /**
+     * Toggle the skeleton debug overlay (bones, meshes, bounds, regions, clipping,
+     * paths). Uses our own duck-typed renderer (see SkeletonDebug) so every flag
+     * works regardless of which spine-runtime copy created the attachments. Works
+     * for both the 4.2 and 4.1 runtimes.
+     */
     setDebugOptions(opts: DebugDrawOptions | null): void {
-        if (!this.spine || !isSpineElement(this.spine)) return;
-        const sp = this.spine as any;
+        if (!this.spine) return;
         const anyOn = !!opts && (opts.bones || opts.meshes || opts.boundingBoxes || opts.regions || opts.clipping || opts.paths);
 
         if (!anyOn) {
-            if (this.debugRenderer) {
-                sp.debug = undefined;
-                this.debugRenderer = null;
-            }
+            this.debug?.destroy();
+            this.debug = null;
             return;
         }
 
-        const wasAttached = this.debugRenderer !== null;
-        if (!this.debugRenderer) this.debugRenderer = new SpineDebugRenderer();
-        const d = this.debugRenderer;
-        d.drawBones = opts!.bones;
-        d.drawMeshHull = opts!.meshes;
-        d.drawMeshTriangles = opts!.meshes;
-        d.drawBoundingBoxes = opts!.boundingBoxes;
-        d.drawRegionAttachments = opts!.regions;
-        d.drawClipping = opts!.clipping;
-        d.drawPaths = opts!.paths;
-        // Only (re)assign on the none→some transition; flag mutations apply live.
-        if (!wasAttached) sp.debug = this.debugRenderer;
+        if (!this.debug) this.debug = new SkeletonDebug(this.spine);
+        this.debug.setFlags(opts!);
+        this.debug.update();
     }
 
     getCurrentSkin(): string | null {
@@ -406,6 +420,9 @@ export class SpineManager {
     }
 
     destroy(): void {
+        // Tear down the debug overlay before destroying the spine that parents it.
+        this.debug?.destroy();
+        this.debug = null;
         if (this.spine) {
             if (this.listener) {
                 this.spine.state.removeListener(this.listener as any);
@@ -413,7 +430,6 @@ export class SpineManager {
             this.spine.destroy();
             this.spine = null;
         }
-        this.debugRenderer = null;
         this.projectName = '';
     }
 }

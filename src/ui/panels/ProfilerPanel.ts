@@ -99,17 +99,33 @@ export class ProfilerPanel {
             v.textContent = value;
             grid.appendChild(v);
         };
+        const c = s.constraints;
+        const constraintTotal = c.ik + c.transform + c.path + c.physics;
         row('Bones', String(s.bones), s.bones > 200);
         row('Slots', String(s.slots), s.slots > 300);
         row('Meshes', `${s.meshes} (${s.meshVertices} verts)`);
-        row('Clipping slots', s.clippingSlots.length ? `${s.clippingSlots.length} — ${s.clippingSlots.join(', ')}` : '0', s.clippingSlots.length > 0);
+        row('Constraints', constraintTotal ? `${constraintTotal} (ik ${c.ik}, tf ${c.transform}, path ${c.path}, phys ${c.physics})` : '0', constraintTotal > 20);
+        row('Clipping masks', String(s.clips.length), s.clips.length > 0);
         row('Blend modes', s.blendSlots.length ? `${s.blendSlots.length} — ${s.blendSlots.map(b => `${b.slot}:${b.mode}`).join(', ')}` : 'normal only', s.blendSlots.length > 0);
         card.appendChild(grid);
 
-        if (s.clippingSlots.length > 0) {
+        // Per-mask clipping breakdown — maps directly to Spine's optimization advice.
+        if (s.clips.length > 0) {
+            const clipWrap = document.createElement('div');
+            clipWrap.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:4px';
+            s.clips.forEach(clip => {
+                const heavy = !clip.convex || clip.vertices > 4 || clip.clippedTriangles > 200;
+                const line = document.createElement('div');
+                line.style.cssText = `font-size:var(--sv-font-size-sm);${heavy ? 'color:#c08a30' : ''}`;
+                const shape = clip.convex ? 'convex' : '⚠ non-convex';
+                line.textContent = `◆ ${clip.slot}: ${clip.vertices} verts (${shape}), clips ${clip.clippedSlots} slot(s) / ${clip.clippedTriangles} tris`;
+                clipWrap.appendChild(line);
+            });
+            card.appendChild(clipWrap);
+
             const note = document.createElement('div');
             note.style.cssText = 'font-size:10px;color:var(--sv-text-muted);margin-top:6px';
-            note.textContent = '⚠ Clipping (masking) is the most expensive Spine feature — it runs every frame the masked slot is drawn.';
+            note.textContent = '⚠ Clipping is the most expensive Spine feature (CPU, every frame). Cheapest when the mask is convex, uses few vertices, and clips few triangles.';
             card.appendChild(note);
         }
         this.summaryEl.appendChild(card);
@@ -182,7 +198,7 @@ export class ProfilerPanel {
             }
             const meta = document.createElement('div');
             meta.style.cssText = 'color:var(--sv-text-muted);font-size:10px;margin-top:2px';
-            meta.textContent = `${a.duration.toFixed(2)}s · ${a.totalTimelines} timelines · ${a.boneTimelines} bone · ${a.colorTimelines} color`;
+            meta.textContent = `${a.duration.toFixed(2)}s · ${a.totalTimelines} timelines · ${a.boneTimelines} bone · ${a.colorTimelines} color · ${a.constraintTimelines} constraint · ${a.deformedVertices} vtx transforms`;
             detail.appendChild(meta);
             wrap.appendChild(detail);
         }

@@ -56,6 +56,7 @@ export class QuickAccessPanel {
     private scaleSlider!: HTMLInputElement;
     private scaleValue!: HTMLElement;
     private isPaused = false;
+    private mixDuration = 0;
 
     // Queue
     private queueListEl!: HTMLElement;
@@ -85,8 +86,9 @@ export class QuickAccessPanel {
             this.queue = [];
             this.triggers = [];
             this.refresh();
-            // Re-apply persisted debug-draw selection to the freshly created spine.
+            // Re-apply persisted debug-draw + mix settings to the freshly created spine.
             this.spineManager.setDebugOptions(this.debug);
+            this.spineManager.setDefaultMix(this.mixDuration);
         });
 
         eventBus.on('spine:event', (data: SpineEventData) => {
@@ -118,6 +120,15 @@ export class QuickAccessPanel {
         eventBus.on('playback:paused-changed', (paused: boolean) => {
             this.isPaused = paused;
             this.pauseBtn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+        });
+
+        // Keep the VIEW zoom slider in sync with wheel / keyboard / reset zoom.
+        eventBus.on('viewport:change', () => {
+            const zoom = this.stateManager.viewport.zoom;
+            if (this.scaleSlider) {
+                this.scaleSlider.value = String(zoom);
+                this.scaleValue.textContent = zoom.toFixed(2) + 'x';
+            }
         });
     }
 
@@ -472,26 +483,97 @@ export class QuickAccessPanel {
             scaleLbl.className = 'sv-control-label';
             scaleLbl.textContent = 'Scale';
             scaleRow.appendChild(scaleLbl);
+            // This slider mirrors the viewport zoom (same thing the mouse wheel
+            // changes), kept in sync both ways via the 'viewport:zoom'/'viewport:change' events.
             this.scaleSlider = document.createElement('input');
             this.scaleSlider.type = 'range';
             this.scaleSlider.className = 'sv-slider';
-            this.scaleSlider.min = '0.1';
-            this.scaleSlider.max = '5';
-            this.scaleSlider.step = '0.1';
-            this.scaleSlider.value = '1';
+            this.scaleSlider.min = '0.05';
+            this.scaleSlider.max = '10';
+            this.scaleSlider.step = '0.05';
+            this.scaleSlider.value = String(this.stateManager.viewport.zoom);
             this.scaleSlider.style.flex = '1';
             this.scaleSlider.addEventListener('input', () => {
-                const scale = parseFloat(this.scaleSlider.value);
-                this.scaleValue.textContent = scale.toFixed(1) + 'x';
-                this.spineManager.setScale(scale);
-                this.stateManager.updateProjectA({ scale });
+                const zoom = parseFloat(this.scaleSlider.value);
+                this.scaleValue.textContent = zoom.toFixed(2) + 'x';
+                eventBus.emit('viewport:zoom', zoom);
             });
             scaleRow.appendChild(this.scaleSlider);
             this.scaleValue = document.createElement('span');
             this.scaleValue.className = 'sv-control-value';
-            this.scaleValue.textContent = '1.0x';
+            this.scaleValue.textContent = this.stateManager.viewport.zoom.toFixed(2) + 'x';
             scaleRow.appendChild(this.scaleValue);
             body.appendChild(scaleRow);
+
+            // Mix (crossfade) duration between animations.
+            const mixRow = document.createElement('div');
+            mixRow.className = 'sv-control-row';
+            const mixLbl = document.createElement('span');
+            mixLbl.className = 'sv-control-label';
+            mixLbl.textContent = 'Mix';
+            mixLbl.title = 'Crossfade duration applied when switching animations';
+            mixRow.appendChild(mixLbl);
+            const mixSlider = document.createElement('input');
+            mixSlider.type = 'range';
+            mixSlider.className = 'sv-slider';
+            mixSlider.min = '0';
+            mixSlider.max = '1';
+            mixSlider.step = '0.05';
+            mixSlider.value = '0';
+            mixSlider.style.flex = '1';
+            const mixValue = document.createElement('span');
+            mixValue.className = 'sv-control-value';
+            mixValue.textContent = '0.00s';
+            mixSlider.addEventListener('input', () => {
+                this.mixDuration = parseFloat(mixSlider.value);
+                mixValue.textContent = this.mixDuration.toFixed(2) + 's';
+                this.spineManager.setDefaultMix(this.mixDuration);
+            });
+            mixRow.appendChild(mixSlider);
+            mixRow.appendChild(mixValue);
+            body.appendChild(mixRow);
+
+            // Reference / mockup image behind the skeleton.
+            const refRow = document.createElement('div');
+            refRow.className = 'sv-control-row';
+            refRow.style.flexWrap = 'wrap';
+            refRow.style.gap = '4px';
+            const refBtn = document.createElement('button');
+            refBtn.className = 'sv-btn sv-btn-sm';
+            refBtn.textContent = '🖼 Reference';
+            refBtn.title = 'Load a reference image behind the skeleton';
+            refBtn.addEventListener('click', () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.addEventListener('change', () => {
+                    const file = input.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => eventBus.emit('reference:image', reader.result as string);
+                    reader.readAsDataURL(file);
+                });
+                input.click();
+            });
+            refRow.appendChild(refBtn);
+            const refClear = document.createElement('button');
+            refClear.className = 'sv-btn sv-btn-sm';
+            refClear.textContent = '✕';
+            refClear.title = 'Remove reference image';
+            refClear.addEventListener('click', () => eventBus.emit('reference:image', null));
+            refRow.appendChild(refClear);
+            const refOpacity = document.createElement('input');
+            refOpacity.type = 'range';
+            refOpacity.className = 'sv-slider';
+            refOpacity.min = '0.05';
+            refOpacity.max = '1';
+            refOpacity.step = '0.05';
+            refOpacity.value = '0.5';
+            refOpacity.style.flex = '1';
+            refOpacity.title = 'Reference image opacity';
+            refOpacity.addEventListener('input', () => eventBus.emit('reference:opacity', parseFloat(refOpacity.value)));
+            refRow.appendChild(refOpacity);
+            body.appendChild(refRow);
         });
         this.element.appendChild(viewSection);
 
@@ -534,6 +616,60 @@ export class QuickAccessPanel {
             body.appendChild(grid);
         });
         this.element.appendChild(debugSection);
+
+        // ── ONION SKIN ───────────────────────────────────────────────
+        const onionSection = this.makeSection('ONION SKIN', (body) => {
+            const hint = document.createElement('div');
+            hint.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 0 6px';
+            hint.textContent = 'Ghost poses before/after the current frame (timing & spacing). Costs extra draw calls.';
+            body.appendChild(hint);
+
+            const cfg = { before: 2, after: 2, step: 3 };
+
+            const enableRow = document.createElement('div');
+            enableRow.className = 'sv-control-row';
+            const enableLbl = document.createElement('span');
+            enableLbl.className = 'sv-control-label';
+            enableLbl.textContent = 'Enable';
+            enableRow.appendChild(enableLbl);
+            const enableWrap = document.createElement('label');
+            enableWrap.className = 'sv-toggle';
+            const enableToggle = document.createElement('input');
+            enableToggle.type = 'checkbox';
+            const enableTrack = document.createElement('span');
+            enableTrack.className = 'sv-toggle-track';
+            enableWrap.appendChild(enableToggle);
+            enableWrap.appendChild(enableTrack);
+            enableRow.appendChild(enableWrap);
+            enableToggle.addEventListener('change', () => eventBus.emit('onion:toggle', enableToggle.checked));
+            body.appendChild(enableRow);
+
+            const numRow = (label: string, key: 'before' | 'after' | 'step', min: number, max: number) => {
+                const row = document.createElement('div');
+                row.className = 'sv-control-row';
+                const lbl = document.createElement('span');
+                lbl.className = 'sv-control-label';
+                lbl.textContent = label;
+                row.appendChild(lbl);
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.min = String(min);
+                input.max = String(max);
+                input.value = String(cfg[key]);
+                input.style.cssText = 'width:56px;padding:2px 6px;border:1px solid var(--sv-border);border-radius:var(--sv-radius);background:var(--sv-bg-input);color:var(--sv-text-primary);font-size:var(--sv-font-size-sm)';
+                input.addEventListener('change', () => {
+                    cfg[key] = Math.max(min, Math.min(max, parseInt(input.value) || min));
+                    input.value = String(cfg[key]);
+                    eventBus.emit('onion:config', { [key]: cfg[key] });
+                });
+                row.appendChild(input);
+                body.appendChild(row);
+            };
+            numRow('Before', 'before', 0, 10);
+            numRow('After', 'after', 0, 10);
+            numRow('Frame step', 'step', 1, 30);
+        });
+        this.element.appendChild(onionSection);
     }
 
     private makeSection(title: string, build: (body: HTMLElement) => void): HTMLElement {

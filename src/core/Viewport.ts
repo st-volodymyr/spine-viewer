@@ -1,4 +1,4 @@
-import { Application, Container, Graphics } from '@electricelephants/pixi-ext';
+import { Application, Container, Graphics, Sprite, Texture } from '@electricelephants/pixi-ext';
 import { eventBus } from './EventBus';
 import type { StateManager } from './StateManager';
 
@@ -9,6 +9,9 @@ export class Viewport {
     private stateManager: StateManager;
     private isPanning = false;
     private lastPointer = { x: 0, y: 0 };
+    private refSprite: Sprite | null = null;
+    private refAlpha = 0.5;
+    private refScale = 1;
 
     constructor(canvas: HTMLCanvasElement, stateManager: StateManager) {
         this.stateManager = stateManager;
@@ -146,6 +149,36 @@ export class Viewport {
             console.error('Frame capture failed:', err);
             return null;
         }
+    }
+
+    /**
+     * Reference/mockup image drawn in world space behind the skeleton (so it
+     * pans/zooms with the content). Pass null to remove.
+     */
+    setReferenceImage(dataUrl: string | null): void {
+        if (this.refSprite) { this.refSprite.destroy(); this.refSprite = null; }
+        if (!dataUrl) return;
+        const img = new Image();
+        img.onload = () => {
+            const sprite = new Sprite(Texture.from(img));
+            sprite.anchor.set(0.5);
+            sprite.zIndex = -500;      // behind the spine (added at zIndex 0), in front of the grid
+            sprite.alpha = this.refAlpha;
+            sprite.scale.set(this.refScale);
+            this.wrapper.addChild(sprite);
+            this.refSprite = sprite;
+        };
+        img.src = dataUrl;
+    }
+
+    setReferenceOpacity(alpha: number): void {
+        this.refAlpha = alpha;
+        if (this.refSprite) this.refSprite.alpha = alpha;
+    }
+
+    setReferenceScale(scale: number): void {
+        this.refScale = scale;
+        if (this.refSprite) this.refSprite.scale.set(scale);
     }
 
     destroy(): void {

@@ -2,6 +2,7 @@ import { eventBus } from '../../core/EventBus';
 import type { Viewport } from '../../core/Viewport';
 import type { SpineManager } from '../../core/SpineManager';
 import type { ComparisonPanel } from '../panels/ComparisonPanel';
+import { StressTest } from '../../services/StressTest';
 
 const WARN_BONES = 200;
 const WARN_SLOTS = 300;
@@ -29,7 +30,10 @@ export class PerformancePanel {
     private chart!: HTMLElement;
     private skeletonSection!: HTMLElement;
 
+    private stressTest: StressTest;
+
     constructor(private viewport: Viewport, private spineManager: SpineManager, private comparisonPanel: ComparisonPanel | null = null) {
+        this.stressTest = new StressTest(viewport, spineManager);
         this.panel = this.buildPanel();
         document.body.appendChild(this.panel);
         viewport.ticker.add(() => this.tick());
@@ -115,6 +119,42 @@ export class PerformancePanel {
         this.warningsEl = document.createElement('div');
         this.warningsEl.style.cssText = 'margin-top:4px;font-size:11px;display:flex;flex-direction:column;gap:3px;min-height:18px';
         panel.appendChild(this.warningsEl);
+
+        // Stress test — raise the instance count and watch FPS / draw calls above.
+        const stressLabel = document.createElement('div');
+        stressLabel.style.cssText = 'margin-top:12px;font-size:10px;color:var(--sv-text-muted);font-weight:600;letter-spacing:0.4px';
+        stressLabel.textContent = 'STRESS TEST';
+        panel.appendChild(stressLabel);
+
+        const stressHint = document.createElement('div');
+        stressHint.style.cssText = 'font-size:10px;color:var(--sv-text-muted);margin:2px 0 4px';
+        stressHint.textContent = 'Clone the skeleton N times and watch the FPS ceiling.';
+        panel.appendChild(stressHint);
+
+        const stressRow = document.createElement('div');
+        stressRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+        const stressSlider = document.createElement('input');
+        stressSlider.type = 'range';
+        stressSlider.className = 'sv-slider';
+        stressSlider.min = '0';
+        stressSlider.max = '100';
+        stressSlider.step = '1';
+        stressSlider.value = '0';
+        stressSlider.style.flex = '1';
+        const stressCount = document.createElement('span');
+        stressCount.style.cssText = 'font-family:var(--sv-font-mono);font-weight:600;min-width:60px;text-align:right';
+        stressCount.textContent = '0 copies';
+        stressSlider.addEventListener('input', () => {
+            const n = parseInt(stressSlider.value);
+            this.stressTest.setCount(n);
+            stressCount.textContent = `${this.stressTest.count} copies`;
+        });
+        stressRow.appendChild(stressSlider);
+        stressRow.appendChild(stressCount);
+        panel.appendChild(stressRow);
+
+        // Keep the slider/label honest if a project reload clears the clones.
+        eventBus.on('project:change', () => { stressSlider.value = '0'; stressCount.textContent = '0 copies'; });
 
         return panel;
     }

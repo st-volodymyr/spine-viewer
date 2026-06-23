@@ -19,6 +19,7 @@ import { parseSpineFiles } from '../services/SpineParser';
 import { detectSpineVersion } from '../services/SpineVersionDetector';
 import { parseAtlasText } from '../services/AtlasParser';
 import { PerfSampler } from '../services/PerfSampler';
+import { OnionSkin } from '../services/OnionSkin';
 import type { SpineFileSet } from '../types/spine';
 import type { SpineProjectState } from '../types/state';
 
@@ -51,6 +52,9 @@ export class App {
         this.buildDropZone();
         this.buildPerformancePanel();
 
+        // Onion skinning (self-wires via EventBus).
+        new OnionSkin(this.viewport, this.spineManager);
+
         // Event listeners
         eventBus.on('comparison:projects-changed', () => {
             if (this.stateManager.mode === 'comparison' && this.dropZone) {
@@ -66,10 +70,21 @@ export class App {
             this.stateManager.setViewport({ zoom: 1 });
         });
 
+        // Zoom set from the VIEW slider (kept in sync with wheel zoom both ways).
+        eventBus.on('viewport:zoom', (zoom: number) => {
+            const z = Math.max(0.05, Math.min(10, zoom));
+            this.viewport.wrapper.scale.set(z, z);
+            this.stateManager.setViewport({ zoom: z });
+        });
+
         // Generic toast channel so any panel can surface a message.
         eventBus.on('toast', (payload: { message: string; type?: 'info' | 'success' | 'warning' | 'error' }) => {
             this.showToast(payload.message, payload.type ?? 'info');
         });
+
+        // Reference/mockup image behind the skeleton (driven from QuickAccessPanel).
+        eventBus.on('reference:image', (dataUrl: string | null) => this.viewport.setReferenceImage(dataUrl));
+        eventBus.on('reference:opacity', (alpha: number) => this.viewport.setReferenceOpacity(alpha));
 
         // Mode switching: hide/show main spine, swap left panel, manage compare state
         eventBus.on('mode:change', (mode: string) => {

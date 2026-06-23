@@ -586,6 +586,74 @@ export class ComparisonPanel {
         if (diff.eventsOnlyA.length || diff.eventsOnlyB.length || diff.eventsShared.length) {
             this.appendEventsDiffSection('Custom Events', nameA, nameB, diff.eventsOnlyA, diff.eventsOnlyB, diff.eventsShared);
         }
+
+        // Attachment-level reskin audit.
+        this.appendReskinSection(nameA, nameB);
+    }
+
+    private appendReskinSection(nameA: string, nameB: string): void {
+        const reskin = this.engine.getReskinDiff(0, 1);
+        const issues = reskin.onlyA.length + reskin.onlyB.length + reskin.mismatches.length;
+
+        const section = document.createElement('div');
+        section.className = 'sv-diff-section';
+
+        const header = document.createElement('div');
+        header.className = 'sv-section-header';
+        const badgeColor = issues === 0 ? '#4a9a5a' : '#c08a30';
+        header.innerHTML = `<span class="sv-section-arrow">▼</span><span>Reskin Overview</span>` +
+            `<span class="sv-tree-badge" style="margin-left:6px;background:${badgeColor}22;color:${badgeColor}">${issues ? `${issues} issue${issues !== 1 ? 's' : ''}` : 'all match'}</span>`;
+        header.addEventListener('click', () => header.classList.toggle('collapsed'));
+        section.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'sv-section-body';
+
+        const summary = document.createElement('div');
+        summary.style.cssText = 'font-size:var(--sv-font-size-sm);color:var(--sv-text-muted);margin-bottom:6px';
+        summary.textContent = `${reskin.matched} matching attachment(s) · ${reskin.mismatches.length} changed · ${reskin.onlyA.length} only in ${nameA} · ${reskin.onlyB.length} only in ${nameB}`;
+        body.appendChild(summary);
+
+        const row = (icon: string, color: string, text: string, detail?: string) => {
+            const r = document.createElement('div');
+            r.style.cssText = 'display:flex;align-items:flex-start;gap:6px;padding:2px 0;font-size:var(--sv-font-size-sm)';
+            const dot = document.createElement('span');
+            dot.style.cssText = `flex-shrink:0;width:8px;height:8px;border-radius:2px;margin-top:4px;background:${color}`;
+            r.appendChild(dot);
+            const wrap = document.createElement('div');
+            wrap.style.flex = '1';
+            wrap.style.minWidth = '0';
+            const main = document.createElement('div');
+            main.textContent = `${icon} ${text}`;
+            wrap.appendChild(main);
+            if (detail) {
+                const det = document.createElement('div');
+                det.style.cssText = 'font-size:10px;color:var(--sv-text-muted)';
+                det.textContent = detail;
+                wrap.appendChild(det);
+            }
+            r.appendChild(wrap);
+            body.appendChild(r);
+        };
+
+        reskin.mismatches.forEach(m => {
+            const parts: string[] = [];
+            if (m.regionDiffers) parts.push(`region: "${m.a.region}" → "${m.b.region}"`);
+            if (m.typeDiffers) parts.push(`type: ${m.a.type} → ${m.b.type}`);
+            row('⚠', '#c08a30', m.key, parts.join(' · '));
+        });
+        reskin.onlyA.forEach(k => row('✕', '#c05050', `${k}`, `Missing in ${nameB}`));
+        reskin.onlyB.forEach(k => row('✕', '#c05050', `${k}`, `Missing in ${nameA}`));
+
+        if (issues === 0) {
+            const ok = document.createElement('div');
+            ok.style.cssText = 'font-size:var(--sv-font-size-sm);color:var(--sv-text-muted)';
+            ok.textContent = 'Every attachment matches by slot, name, region and type.';
+            body.appendChild(ok);
+        }
+
+        section.appendChild(body);
+        this.diffContainer.appendChild(section);
     }
 
     private appendEventsDiffSection(title: string, nameA: string, nameB: string, onlyA: string[], onlyB: string[], shared: string[]): void {
