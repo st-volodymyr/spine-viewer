@@ -500,7 +500,7 @@ export class PlaceholderPanel {
         clearBtn.addEventListener('click', () => {
             this.clearSlotContentIn(slotName, entries);
             textInput.value = '';
-            imgStatus.textContent = '';
+            imgStatus.textContent = imgStatus.title = '';
             syncSpineRow();
         });
         imgRow.appendChild(clearBtn);
@@ -575,6 +575,9 @@ export class PlaceholderPanel {
                 opt.value = opt.textContent = a.name;
                 animSelect.appendChild(opt);
             }
+            const current = (child.spine.state as any).getCurrent(0);
+            animSelect.value = current?.animation?.name ?? '';
+            if (current) loopCb.checked = current.loop;
             skinSelect.innerHTML = '';
             for (const s of data.skins as any[]) {
                 const opt = document.createElement('option');
@@ -632,7 +635,7 @@ export class PlaceholderPanel {
                 this.hideSlotIn(slotName, entries);
                 contentRow.style.display = 'none';
                 textInput.value = '';
-                imgStatus.textContent = '';
+                imgStatus.textContent = imgStatus.title = '';
                 xInput.value = '0';
                 yInput.value = '0';
                 scaleInput.value = '1';
@@ -934,9 +937,12 @@ export class PlaceholderPanel {
             }
         }
 
-        // Sync toggle state in DOM
-        this.listEl.querySelectorAll('input[type="checkbox"]').forEach(t => {
-            (t as HTMLInputElement).checked = show;
+        // Sync the slot toggles only (not the slot-spine Loop/Sync boxes). Switching off goes
+        // through the row's change handler so its content controls reset too.
+        this.listEl.querySelectorAll<HTMLInputElement>('.sv-toggle > input[type="checkbox"]').forEach(t => {
+            if (t.checked === show) return;
+            t.checked = show;
+            if (!show) t.dispatchEvent(new Event('change'));
         });
     }
 
