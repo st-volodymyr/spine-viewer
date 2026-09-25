@@ -65,6 +65,11 @@ export interface ProfileResult {
     animations: AnimationCost[]; // sorted heaviest-first
 }
 
+/** First few names, then "+N more" — keeps driver details readable on big skeletons. */
+function listSome(names: string[], max = 8): string {
+    return names.length <= max ? names.join(', ') : `${names.slice(0, max).join(', ')} +${names.length - max} more`;
+}
+
 const BLEND_MODE_NAMES = ['normal', 'additive', 'multiply', 'screen'];
 
 const W = {
@@ -270,7 +275,7 @@ function analyzeAnimation(anim: any, ctx: ReturnType<typeof analyzeSkeleton>): A
 
     const drivers: CostDriver[] = [];
     if (touchesClipping) {
-        drivers.push({ label: `Clipping ×${clippedSlots.length}`, detail: `Clipped slots: ${clippedSlots.join(', ')}`, weight: W.touchesClipping + clippedSlots.length * W.perClippedSlot });
+        drivers.push({ label: `Clipping ×${clippedSlots.length}`, detail: `Clipped slots: ${listSome(clippedSlots)}`, weight: W.touchesClipping + clippedSlots.length * W.perClippedSlot });
     }
     if (m.deformedVertices > 0) {
         drivers.push({ label: `Mesh deform — ${m.deformedVertices} verts`, detail: `${m.deformTimelines} deform timeline(s)`, weight: m.deformedVertices * W.deformVertex + m.deformTimelines * W.deformTimeline });
@@ -279,7 +284,7 @@ function analyzeAnimation(anim: any, ctx: ReturnType<typeof analyzeSkeleton>): A
         drivers.push({ label: `Draw-order — ${m.drawOrderKeys} keys`, detail: 'Re-sorts the render order each key (breaks batching)', weight: m.drawOrderKeys * W.drawOrderKey });
     }
     if (touchesBlend) {
-        drivers.push({ label: `Blend modes ×${blendedSlots.length}`, detail: `Non-normal blend on: ${blendedSlots.join(', ')}`, weight: W.touchesBlend });
+        drivers.push({ label: `Blend modes ×${blendedSlots.length}`, detail: `Non-normal blend on: ${listSome(blendedSlots)}`, weight: W.touchesBlend });
     }
     if (m.constraintTimelines > 0) {
         drivers.push({ label: `Constraints — ${m.constraintTimelines} timeline(s)`, weight: m.constraintTimelines * W.constraintTimeline });

@@ -106,8 +106,31 @@ export class ProfilerPanel {
         row('Meshes', `${s.meshes} (${s.meshVertices} verts)`);
         row('Constraints', constraintTotal ? `${constraintTotal} (ik ${c.ik}, tf ${c.transform}, path ${c.path}, phys ${c.physics})` : '0', constraintTotal > 20);
         row('Clipping masks', String(s.clips.length), s.clips.length > 0);
-        row('Blend modes', s.blendSlots.length ? `${s.blendSlots.length} — ${s.blendSlots.map(b => `${b.slot}:${b.mode}`).join(', ')}` : 'normal only', s.blendSlots.length > 0);
+        const byMode = new Map<string, string[]>();
+        s.blendSlots.forEach(b => byMode.set(b.mode, [...(byMode.get(b.mode) ?? []), b.slot]));
+        const modeSummary = [...byMode].map(([mode, slots]) => `${mode} ${slots.length}`).join(', ');
+        row('Blend modes', s.blendSlots.length ? `${s.blendSlots.length} slots (${modeSummary})` : 'normal only', s.blendSlots.length > 0);
         card.appendChild(grid);
+
+        // Slot names can run into the hundreds — keep them behind a disclosure.
+        if (s.blendSlots.length > 0) {
+            const details = document.createElement('details');
+            details.style.cssText = 'margin-top:6px;font-size:var(--sv-font-size-sm)';
+            const summary = document.createElement('summary');
+            summary.style.cssText = 'cursor:pointer;color:var(--sv-text-muted)';
+            summary.textContent = `Non-normal blend slots (${s.blendSlots.length})`;
+            details.appendChild(summary);
+            byMode.forEach((slots, mode) => {
+                const line = document.createElement('div');
+                line.style.cssText = 'margin-top:4px;color:var(--sv-text-secondary);word-break:break-word';
+                const label = document.createElement('strong');
+                label.textContent = `${mode} (${slots.length}): `;
+                line.appendChild(label);
+                line.appendChild(document.createTextNode(slots.join(', ')));
+                details.appendChild(line);
+            });
+            card.appendChild(details);
+        }
 
         // Per-mask clipping breakdown — maps directly to Spine's optimization advice.
         if (s.clips.length > 0) {
