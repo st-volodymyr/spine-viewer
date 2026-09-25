@@ -1,19 +1,41 @@
 import { eventBus } from '../../core/EventBus';
-import { Graphics, Sprite, Text, Texture } from '@electricelephants/pixi-ext';
+import { Container, Graphics, Matrix, Sprite, Text, Texture } from '@electricelephants/pixi-ext';
 import { SpineElement } from '@electricelephants/pixi-ext';
+import { Spine as Spine41 } from '@pixi-spine/all-4.1';
 import type { SpineManager } from '../../core/SpineManager';
 import type { StateManager } from '../../core/StateManager';
-import type { Container } from '@electricelephants/pixi-ext';
+import { loadSpineFiles, createFileInput } from '../../services/FileLoader';
+import { parseSpineFiles, clearSpineCache } from '../../services/SpineParser';
+import { detectSpineVersion } from '../../services/SpineVersionDetector';
 
 const MARKER_SIZE = 12;
 const MARKER_LABEL = 'sv-marker-label';
+const NUM_INPUT_CSS = 'width:52px;padding:1px 4px;border:1px solid var(--sv-border);border-radius:var(--sv-radius);background:var(--sv-bg-input);color:var(--sv-text-primary);font-size:var(--sv-font-size-sm)';
+
+type AnySpine = SpineElement | Spine41;
+
+/** A second skeleton placed into a slot (like a symbol inside a win frame). */
+interface ChildSpine {
+    spine: AnySpine;
+    cacheKey: string | null;  // pixi-ext Cache key (4.2 only), cleared on removal
+    name: string;
+}
 
 interface PlaceholderEntry {
     slotName: string;
     marker: Graphics | null;
-    contentSprite: Sprite | null;
-    contentText: Text | null;
-    container: Container | null;  // when set, content is parented to the slot (no manual follow)
+    // anchor follows the slot: inside pixi-ext's slot container (bone transform + draw
+    // order for free), or — 4.1 runtime, whose slot containers hide while the slot is
+    // empty — a spine child whose transform the follow-loop copies from the bone.
+    anchor: Container | null;
+    followBone: boolean;
+    adjust: Container | null;     // user offset/scale inside the anchor; parents the content
+    content: Sprite | Text | AnySpine | null;
+    child: ChildSpine | null;
+    offsetX: number;
+    offsetY: number;
+    scale: number;
+    sync: boolean;                // child spine mirrors the parent's pause + speed
 }
 
 type Entries = Map<string, PlaceholderEntry>;
@@ -114,7 +136,7 @@ export class PlaceholderPanel {
         info.style.fontSize = 'var(--sv-font-size-sm)';
         info.style.color = 'var(--sv-text-muted)';
         info.style.padding = '2px 0 6px';
-        info.textContent = 'Toggle a slot to show its marker. Set a label or image to overlay content at that position.';
+        info.textContent = 'Toggle a slot to show its marker. Put a label, an image or another spine into the slot — it follows the slot’s bone, with its own offset/scale.';
         this.element.appendChild(info);
 
         const legend = document.createElement('div');
@@ -426,7 +448,8 @@ export class PlaceholderPanel {
 
         const imgBtn = document.createElement('button');
         imgBtn.className = 'sv-btn sv-btn-sm';
-        imgBtn.textContent = '\uD83D\uDDBC Upload Image';
+        imgBtn.textContent = '\uD83D\uDDBC Image';
+        imgBtn.title = 'Put an image into the slot';
         imgBtn.addEventListener('click', () => {
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
@@ -436,8 +459,11 @@ export class PlaceholderPanel {
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = () => {
-                    this.setImageContentFor(slotName, reader.result as string, manager, entries);
-                    imgStatus.textContent = file.name;
+                    this.setImageContentFor(slotName, reader.result as string, manager, entries).then(() => {
+                        imgStatus.textContent = file.name;
+                        imgStatus.title = file.name;
+                        syncSpineRow();
+                    });
                 };
                 reader.readAsDataURL(file);
             });
@@ -445,12 +471,26 @@ export class PlaceholderPanel {
         });
         imgRow.appendChild(imgBtn);
 
+        const spineBtn = document.createElement('button');
+        spineBtn.className = 'sv-btn sv-btn-sm';
+        spineBtn.textContent = '\u2726 Spine';
+        spineBtn.title = 'Put another skeleton into the slot (skeleton + atlas + textures, or a .spine archive)';
+        spineBtn.addEventListener('click', () => {
+            createFileInput(true, (files) => {
+                this.setSpineContentFor(slotName, files, manager, entries).then(child => {
+                    imgStatus.textContent = child.name;
+                    imgStatus.title = child.name;
+                    syncSpineRow();
+                }).catch((err: any) => {
+                    console.error('Failed to load slot spine:', err);
+                    eventBus.emit('toast', { message: `Slot spine: ${err?.message ?? err}`, type: 'error' });
+                });
+            }).click();
+        });
+        imgRow.appendChild(spineBtn);
+
         const imgStatus = document.createElement('span');
-        imgStatus.style.fontSize = 'var(--sv-font-size-sm)';
-        imgStatus.style.color = 'var(--sv-text-muted)';
-        imgStatus.style.overflow = 'hidden';
-        imgStatus.style.textOverflow = 'ellipsis';
-        imgStatus.style.whiteSpace = 'nowrap';
+        imgStatus.style.cssText = 'flex:1;min-width:0;font-size:var(--sv-font-size-sm);color:var(--sv-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
         imgRow.appendChild(imgStatus);
 
         const clearBtn = document.createElement('button');
@@ -461,10 +501,128 @@ export class PlaceholderPanel {
             this.clearSlotContentIn(slotName, entries);
             textInput.value = '';
             imgStatus.textContent = '';
+            syncSpineRow();
         });
         imgRow.appendChild(clearBtn);
         contentRow.appendChild(imgRow);
+
+        // Child-spine controls (shown once a skeleton sits in the slot)
+        const spineRow = document.createElement('div');
+        spineRow.style.cssText = 'display:none;flex-wrap:wrap;gap:4px;align-items:center';
+        const animSelect = document.createElement('select');
+        animSelect.className = 'sv-select';
+        animSelect.style.cssText = 'flex:1;min-width:90px';
+        animSelect.title = 'Animation of the slot spine';
+        const skinSelect = document.createElement('select');
+        skinSelect.className = 'sv-select';
+        skinSelect.style.cssText = 'flex:1;min-width:70px';
+        skinSelect.title = 'Skin of the slot spine';
+        const makeCheck = (text: string, title: string, checked: boolean): [HTMLLabelElement, HTMLInputElement] => {
+            const lbl = document.createElement('label');
+            lbl.style.cssText = 'display:flex;align-items:center;gap:2px;font-size:var(--sv-font-size-sm);color:var(--sv-text-muted)';
+            lbl.title = title;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = checked;
+            lbl.appendChild(cb);
+            lbl.appendChild(document.createTextNode(text));
+            return [lbl, cb];
+        };
+        const [loopLbl, loopCb] = makeCheck('Loop', 'Loop the slot spine animation', true);
+        const [syncLbl, syncCb] = makeCheck('Sync', 'Pause and speed follow the parent skeleton', true);
+        spineRow.append(animSelect, loopLbl, skinSelect, syncLbl);
+        contentRow.appendChild(spineRow);
+
+        const playChild = () => {
+            const child = entries.get(slotName)?.child;
+            if (child) this.playChildAnimation(child.spine, animSelect.value, loopCb.checked);
+        };
+        animSelect.addEventListener('change', playChild);
+        loopCb.addEventListener('change', playChild);
+        skinSelect.addEventListener('change', () => {
+            const child = entries.get(slotName)?.child;
+            if (!child) return;
+            const skeleton: any = child.spine.skeleton;
+            skeleton.setSkinByName(skinSelect.value);
+            skeleton.setSlotsToSetupPose();
+            (child.spine as any).update(0);
+        });
+        syncCb.addEventListener('change', () => {
+            const entry = entries.get(slotName);
+            if (!entry) return;
+            entry.sync = syncCb.checked;
+            if (!entry.sync && entry.child) {
+                // Unsynced: the slot spine runs on its own clock again.
+                entry.child.spine.autoUpdate = true;
+                entry.child.spine.state.timeScale = 1;
+            }
+            this.ensureTicking();
+        });
+
+        const syncSpineRow = () => {
+            const entry = entries.get(slotName);
+            const child = entry?.child;
+            spineRow.style.display = child ? 'flex' : 'none';
+            if (!child) return;
+            const data: any = child.spine.skeleton.data;
+            animSelect.innerHTML = '';
+            const setup = document.createElement('option');
+            setup.value = '';
+            setup.textContent = '(setup pose)';
+            animSelect.appendChild(setup);
+            for (const a of data.animations as any[]) {
+                const opt = document.createElement('option');
+                opt.value = opt.textContent = a.name;
+                animSelect.appendChild(opt);
+            }
+            skinSelect.innerHTML = '';
+            for (const s of data.skins as any[]) {
+                const opt = document.createElement('option');
+                opt.value = opt.textContent = s.name;
+                skinSelect.appendChild(opt);
+            }
+            skinSelect.value = (child.spine.skeleton.skin as any)?.name ?? 'default';
+            skinSelect.style.display = data.skins.length > 1 ? '' : 'none';
+            syncCb.checked = entry!.sync;
+        };
+
+        // Offset / scale of whatever sits in the slot (bone-local space)
+        const xfRow = document.createElement('div');
+        xfRow.style.cssText = 'display:flex;gap:4px;align-items:center;font-size:var(--sv-font-size-sm);color:var(--sv-text-muted)';
+        const makeNum = (label: string, value: number, step: number, apply: (e: PlaceholderEntry, v: number) => void): HTMLInputElement => {
+            const lbl = document.createElement('span');
+            lbl.textContent = label;
+            const num = document.createElement('input');
+            num.type = 'number';
+            num.step = String(step);
+            num.value = String(value);
+            num.style.cssText = NUM_INPUT_CSS;
+            num.addEventListener('input', () => {
+                const v = parseFloat(num.value);
+                if (!isFinite(v)) return;
+                const entry = this.getOrCreateEntryIn(slotName, entries);
+                apply(entry, v);
+                this.applyAdjust(entry);
+            });
+            xfRow.append(lbl, num);
+            return num;
+        };
+        const xInput = makeNum('X', 0, 1, (e, v) => { e.offsetX = v; });
+        const yInput = makeNum('Y', 0, 1, (e, v) => { e.offsetY = v; });
+        const scaleInput = makeNum('Scale', 1, 0.05, (e, v) => { e.scale = v; });
+        xfRow.title = 'Offset and scale of the slot content, relative to the slot bone';
+        contentRow.appendChild(xfRow);
         wrapper.appendChild(contentRow);
+
+        // Restore the controls when the list is rebuilt around live compare-mode entries.
+        const existing = entries.get(slotName);
+        if (existing) {
+            xInput.value = String(existing.offsetX);
+            yInput.value = String(existing.offsetY);
+            scaleInput.value = String(existing.scale);
+            if (existing.child) imgStatus.textContent = existing.child.name;
+            syncSpineRow();
+        }
 
         input.addEventListener('change', () => {
             if (input.checked) {
@@ -475,6 +633,10 @@ export class PlaceholderPanel {
                 contentRow.style.display = 'none';
                 textInput.value = '';
                 imgStatus.textContent = '';
+                xInput.value = '0';
+                yInput.value = '0';
+                scaleInput.value = '1';
+                syncSpineRow();
             }
         });
 
@@ -485,7 +647,10 @@ export class PlaceholderPanel {
 
     private getOrCreateEntryIn(slotName: string, entries: Entries): PlaceholderEntry {
         if (!entries.has(slotName)) {
-            entries.set(slotName, { slotName, marker: null, contentSprite: null, contentText: null, container: null });
+            entries.set(slotName, {
+                slotName, marker: null, anchor: null, followBone: false, adjust: null,
+                content: null, child: null, offsetX: 0, offsetY: 0, scale: 1, sync: true,
+            });
         }
         return entries.get(slotName)!;
     }
@@ -547,7 +712,7 @@ export class PlaceholderPanel {
     private needsTicking(): boolean {
         const has = (entries: Entries): boolean => {
             for (const e of entries.values()) {
-                if (e.marker || ((e.contentSprite || e.contentText) && !e.container)) return true;
+                if (e.marker || (e.anchor && e.followBone) || (e.child && e.sync)) return true;
             }
             return false;
         };
@@ -562,47 +727,110 @@ export class PlaceholderPanel {
         this.tickHandle = this.needsTicking() ? requestAnimationFrame(this.tickPositions) : null;
     };
 
+    private followMatrix = new Matrix();
+
     private applyFollow(entries: Entries, manager: SpineManager): void {
         const spine = manager.spine;
         if (!spine) return;
         entries.forEach(entry => {
-            const slot = spine.skeleton.findSlot(entry.slotName);
+            const slot: any = spine.skeleton.findSlot(entry.slotName);
             const bone = slot?.bone;
             if (!bone) return;
+            // Bone-driven anchor (no slot container): full bone transform + slot alpha,
+            // i.e. what a slot container would give it. The 4.1 runtime keeps it as a Pixi
+            // matrix on the bone; spine-core has a..d (b/c are swapped in Pixi).
+            if (entry.anchor && entry.followBone) {
+                const m = typeof bone.matrix?.tx === 'number'
+                    ? bone.matrix
+                    : this.followMatrix.set(bone.a, bone.c, bone.b, bone.d, bone.worldX, bone.worldY);
+                entry.anchor.transform.setFromMatrix(m);
+                entry.anchor.alpha = slot.color?.a ?? 1;
+                entry.anchor.visible = bone.active !== false;
+            }
+            if (entry.child && entry.sync && !entry.child.spine.destroyed) {
+                entry.child.spine.autoUpdate = spine.autoUpdate;
+                entry.child.spine.state.timeScale = spine.state.timeScale;
+            }
             if (entry.marker) {
                 entry.marker.position.set(bone.worldX, bone.worldY);
-                this.placeMarkerLabel(entry.marker, entry.contentSprite ?? entry.contentText);
-            }
-            // Content parented to the slot container is positioned by Pixi already.
-            if (!entry.container) {
-                entry.contentSprite?.position.set(bone.worldX, bone.worldY);
-                entry.contentText?.position.set(bone.worldX, bone.worldY);
+                this.placeMarkerLabel(entry.marker, entry.content);
             }
         });
     }
 
     /** Keep the marker's slot-name label clear of the overlay content drawn at the same bone. */
-    private placeMarkerLabel(marker: Graphics, content: Sprite | Text | null): void {
+    private placeMarkerLabel(marker: Graphics, content: Container | null): void {
         const label = marker.getChildByName(MARKER_LABEL) as Text | null;
         if (!label) return;
         let y = -MARKER_SIZE - 3;
-        if (content && !content.destroyed && content.visible) {
+        if (content && !content.destroyed && content.visible && content.worldVisible) {
             const b = content.getBounds();
-            // Global bounds → marker space (min of both edges handles a flipped skeleton).
-            const top = marker.toLocal({ x: b.x, y: b.y } as any).y;
-            const bottom = marker.toLocal({ x: b.x, y: b.y + b.height } as any).y;
-            y = Math.min(y, Math.min(top, bottom) - 3);
+            if (b.width > 0 || b.height > 0) {
+                // Global bounds → marker space (min of both edges handles a flipped skeleton).
+                const top = marker.toLocal({ x: b.x, y: b.y } as any).y;
+                const bottom = marker.toLocal({ x: b.x, y: b.y + b.height } as any).y;
+                y = Math.min(y, Math.min(top, bottom) - 3);
+            }
         }
         label.y = y;
     }
 
+    // ── Slot content ─────────────────────────────────────────────────────────
+
+    /** Put `content` into the slot (replacing what was there), under the offset/scale holder. */
+    private placeContent(entry: PlaceholderEntry, manager: SpineManager, content: Sprite | Text | AnySpine, child: ChildSpine | null = null): boolean {
+        this.clearContent(entry);
+        const spine = manager.spine;
+        if (!spine) {
+            content.destroy();
+            if (child?.cacheKey) clearSpineCache(child.cacheKey);
+            return false;
+        }
+        const anchor = new Container();
+        const slotContainer = this.getSlotContainerFrom(entry.slotName, manager);
+        if (slotContainer) {
+            slotContainer.addChild(anchor);
+            entry.followBone = false;
+        } else {
+            anchor.zIndex = 1000;
+            spine.addChild(anchor);
+            entry.followBone = true;
+        }
+        const adjust = new Container();
+        anchor.addChild(adjust);
+        adjust.addChild(content);
+        entry.anchor = anchor;
+        entry.adjust = adjust;
+        entry.content = content;
+        entry.child = child;
+        this.applyAdjust(entry);
+        // Position a bone-driven anchor right away (not a frame late).
+        this.applyFollow(new Map([[entry.slotName, entry]]), manager);
+        this.ensureTicking();
+        return true;
+    }
+
+    private applyAdjust(entry: PlaceholderEntry): void {
+        if (!entry.adjust) return;
+        entry.adjust.position.set(entry.offsetX, entry.offsetY);
+        entry.adjust.scale.set(entry.scale);
+    }
+
+    private clearContent(entry: PlaceholderEntry): void {
+        if (entry.content && !entry.content.destroyed) entry.content.destroy();
+        if (entry.child?.cacheKey) clearSpineCache(entry.child.cacheKey);
+        if (entry.anchor && !entry.anchor.destroyed) entry.anchor.destroy({ children: true });
+        entry.content = null;
+        entry.child = null;
+        entry.anchor = null;
+        entry.adjust = null;
+        entry.followBone = false;
+    }
+
     private setTextContentFor(slotName: string, text: string, style: { fontSize: number; fill: string; stroke?: string; strokeThickness?: number; fontFamily?: string; fontWeight?: string; fontStyle?: string }, manager: SpineManager, entries: Entries): void {
         const entry = this.getOrCreateEntryIn(slotName, entries);
-        this.clearSlotContentIn(slotName, entries);
+        this.clearContent(entry);
         if (!text.trim()) return;
-
-        const spine = manager.spine;
-        if (!spine) return;
 
         const pixiText = new Text(text, {
             fontSize: style.fontSize,
@@ -614,59 +842,68 @@ export class PlaceholderPanel {
             fontStyle: style.fontStyle ?? 'normal',
         } as any);
         pixiText.anchor.set(0.5, 0.5);
-        pixiText.zIndex = 1000;
-
-        const slotContainer = this.getSlotContainerFrom(slotName, manager);
-        if (slotContainer) {
-            slotContainer.addChild(pixiText);
-            entry.container = slotContainer;
-        } else {
-            spine.addChild(pixiText);
-        }
-        entry.contentText = pixiText;
-        this.ensureTicking();
+        this.placeContent(entry, manager, pixiText);
     }
 
-    private setImageContentFor(slotName: string, dataUrl: string, manager: SpineManager, entries: Entries): void {
+    private setImageContentFor(slotName: string, dataUrl: string, manager: SpineManager, entries: Entries): Promise<void> {
         const entry = this.getOrCreateEntryIn(slotName, entries);
-        if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
-        if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
+        return new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => {
+                const sprite = new Sprite(Texture.from(img));
+                sprite.anchor.set(0.5, 0.5);
+                this.placeContent(entry, manager, sprite);
+                resolve();
+            };
+            img.onerror = () => resolve();
+            img.src = dataUrl;
+        });
+    }
 
-        const spine = manager.spine;
-        if (!spine) return;
+    /**
+     * Parse another skeleton (own Cache key, like a compare project) and place it into the
+     * slot, in setup pose. Its origin sits on the slot bone.
+     */
+    private async setSpineContentFor(slotName: string, files: FileList, manager: SpineManager, entries: Entries): Promise<ChildSpine> {
+        const fileSet = await loadSpineFiles(files);
+        const version = detectSpineVersion(fileSet);
+        const result = await parseSpineFiles(fileSet, version.detected === '4.1' ? '4.1' : '4.2');
+        const child: ChildSpine = result.runtimeVersion === '4.1'
+            ? { spine: new Spine41(result.skeletonData as any), cacheKey: null, name: fileSet.skeleton.name }
+            : { spine: new SpineElement(result.projectName), cacheKey: result.projectName, name: fileSet.skeleton.name };
+        // Symbol-style skeletons keep the art in named skins (default = shared bits only);
+        // a named skin still falls back to default attachments, so picking one is safe.
+        const skeleton: any = child.spine.skeleton;
+        const named = (skeleton.data.skins as any[]).find(s => s.name !== 'default');
+        if (named && (!skeleton.skin || skeleton.skin.name === 'default')) {
+            skeleton.setSkin(named);
+            skeleton.setSlotsToSetupPose();
+            (child.spine as any).update(0);
+        }
+        const entry = this.getOrCreateEntryIn(slotName, entries);
+        if (!this.placeContent(entry, manager, child.spine, child)) throw new Error('No skeleton loaded');
+        return child;
+    }
 
-        const img = new Image();
-        img.onload = () => {
-            const texture = Texture.from(img);
-            const sprite = new Sprite(texture);
-            sprite.anchor.set(0.5, 0.5);
-            sprite.zIndex = 1000;
-
-            const slotContainer = this.getSlotContainerFrom(slotName, manager);
-            if (slotContainer) {
-                slotContainer.addChild(sprite);
-                entry.container = slotContainer;
-            } else {
-                spine.addChild(sprite);
-            }
-            entry.contentSprite = sprite;
-            this.ensureTicking();
-        };
-        img.src = dataUrl;
+    /** Play `name` on the slot spine's track 0; empty name = back to setup pose. */
+    private playChildAnimation(spine: AnySpine, name: string, loop: boolean): void {
+        const state: any = spine.state;
+        state.clearTracks();
+        spine.skeleton.setToSetupPose();
+        if (name) state.setAnimation(0, name, loop);
+        (spine as any).update(0);
     }
 
     private clearSlotContentIn(slotName: string, entries: Entries): void {
         const entry = entries.get(slotName);
-        if (!entry) return;
-        if (entry.contentSprite) { entry.contentSprite.destroy(); entry.contentSprite = null; }
-        if (entry.contentText) { entry.contentText.destroy(); entry.contentText = null; }
+        if (entry) this.clearContent(entry);
     }
 
     private hideSlotIn(slotName: string, entries: Entries): void {
         const entry = entries.get(slotName);
         if (!entry) return;
-        if (entry.marker) { entry.marker.destroy(); entry.marker = null; }
-        this.clearSlotContentIn(slotName, entries);
+        if (entry.marker) { entry.marker.destroy({ children: true }); entry.marker = null; }
+        this.clearContent(entry);
         entries.delete(slotName);
         // The shared loop self-stops on its next frame once nothing needs following.
     }
