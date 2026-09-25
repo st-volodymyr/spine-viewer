@@ -293,8 +293,9 @@ export class App {
         const placeholderPanel = new PlaceholderPanel(this.stateManager, this.spineManager);
         this.layout.addTab('placeholders', 'Slots', placeholderPanel.element);
 
+        // Profiler lives inside Inspect (keeps the right tab strip to one row).
         const profilerPanel = new ProfilerPanel(this.stateManager, this.spineManager);
-        this.layout.addTab('profiler', 'Profiler', profilerPanel.element);
+        skeletonInspector.addPanelTab('Profiler', profilerPanel.element);
 
         const eventPanel = new EventDebugPanel(this.spineManager, this.stateManager);
         this.layout.addTab('events', 'Events', eventPanel.element);

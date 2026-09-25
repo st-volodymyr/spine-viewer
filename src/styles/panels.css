@@ -859,7 +859,7 @@
 }
 
 /* ── Left panel: list filters + TOOLS group ─────────────────────── */
-.sv-list-filter {
+.sv-tree-search.sv-list-filter {
     display: block;
     width: calc(100% - 16px);
     margin: 4px 8px;

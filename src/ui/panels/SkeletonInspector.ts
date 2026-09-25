@@ -14,6 +14,8 @@ export class SkeletonInspectorPanel {
     element: HTMLElement;
     private tabs: Map<string, HTMLElement> = new Map();
     private tabContents: Map<string, HTMLElement> = new Map();
+    /** Sub-tabs hosting external panels (not rebuilt by refresh). */
+    private panelTabs = new Set<string>();
     private tabBar: HTMLElement;
     private contentArea: HTMLElement;
     private detailPanel: HTMLElement;
@@ -137,6 +139,30 @@ export class SkeletonInspectorPanel {
         this.activateCategory('Info');
     }
 
+    /**
+     * Mount a self-refreshing panel (e.g. the Profiler) as a sub-tab right after
+     * `after`. Its content is owned by the panel — `refresh()` leaves it alone —
+     * and the node-detail footer is hidden while it is shown.
+     */
+    addPanelTab(label: string, panel: HTMLElement, after = 'Info'): void {
+        const tab = document.createElement('div');
+        tab.className = 'sv-tab';
+        tab.textContent = label;
+        tab.style.padding = '4px 8px';
+        tab.addEventListener('click', () => this.activateCategory(label));
+        const anchor = this.tabs.get(after);
+        if (anchor) anchor.after(tab);
+        else this.tabBar.appendChild(tab);
+        this.tabs.set(label, tab);
+
+        const content = document.createElement('div');
+        content.style.display = 'none';
+        content.appendChild(panel);
+        this.contentArea.appendChild(content);
+        this.tabContents.set(label, content);
+        this.panelTabs.add(label);
+    }
+
     private activateCategory(cat: string): void {
         this.tabs.forEach((tab, key) => {
             tab.classList.toggle('active', key === cat);
@@ -144,6 +170,7 @@ export class SkeletonInspectorPanel {
         this.tabContents.forEach((content, key) => {
             content.style.display = key === cat ? 'block' : 'none';
         });
+        this.detailPanel.style.display = this.panelTabs.has(cat) ? 'none' : '';
     }
 
     refresh(): void {
