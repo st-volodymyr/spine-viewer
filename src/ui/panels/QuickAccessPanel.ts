@@ -11,6 +11,9 @@ const SEVERITY_COLOR: Record<Severity, string> = {
     heavy: '#c05050',
 };
 
+/** Lists longer than this get a filter box. */
+const FILTER_MIN_ITEMS = 8;
+
 interface EventTrigger {
     id: number;
     eventName: string;
@@ -31,6 +34,7 @@ export class QuickAccessPanel {
     private currentAnim = '';
     private currentTrack = 0;
     private animCosts = new Map<string, AnimationCost>();
+    private animFilter!: HTMLInputElement;
 
     // Skins. Single-select by default; opt into combining N skins via the toggle.
     private skinList!: HTMLElement;
@@ -39,6 +43,10 @@ export class QuickAccessPanel {
     private multiSkinToggle!: HTMLInputElement;
     private multiSkin = false;
     private currentSkins = new Set<string>();
+    private skinFilter!: HTMLInputElement;
+
+    private toolsBody!: HTMLElement;
+    private triggerSection!: HTMLElement;
 
     // Debug draw
     private debug: DebugDrawOptions = {
@@ -171,7 +179,7 @@ export class QuickAccessPanel {
         animHeader.appendChild(this.animBadge);
 
         animSection.appendChild(animHeader);
-        animHeader.addEventListener('click', () => animHeader.classList.toggle('collapsed'));
+        this.wireCollapse(animHeader, 'ANIMATIONS', false);
 
         const animBody = document.createElement('div');
         animBody.className = 'sv-section-body';
@@ -210,8 +218,11 @@ export class QuickAccessPanel {
         this.animTag.style.fontSize = 'var(--sv-font-size-sm)';
         animBody.appendChild(this.animTag);
 
+        this.animFilter = this.makeFilter('Filter animations\u2026', () => this.applyFilter(this.animList, this.animFilter));
+        animBody.appendChild(this.animFilter);
+
         this.animList = document.createElement('div');
-        this.animList.style.maxHeight = '200px';
+        this.animList.style.maxHeight = 'min(45vh, 440px)';
         this.animList.style.overflowY = 'auto';
         animBody.appendChild(this.animList);
 
@@ -241,7 +252,7 @@ export class QuickAccessPanel {
         skinHeader.appendChild(this.skinBadge);
 
         skinSection.appendChild(skinHeader);
-        skinHeader.addEventListener('click', () => skinHeader.classList.toggle('collapsed'));
+        this.wireCollapse(skinHeader, 'SKINS', false);
 
         const skinBody = document.createElement('div');
         skinBody.className = 'sv-section-body';
@@ -284,8 +295,11 @@ export class QuickAccessPanel {
         skinBody.appendChild(this.skinHint);
         this.updateSkinHint();
 
+        this.skinFilter = this.makeFilter('Filter skins\u2026', () => this.applyFilter(this.skinList, this.skinFilter));
+        skinBody.appendChild(this.skinFilter);
+
         this.skinList = document.createElement('div');
-        this.skinList.style.maxHeight = '160px';
+        this.skinList.style.maxHeight = 'min(30vh, 260px)';
         this.skinList.style.overflowY = 'auto';
         skinBody.appendChild(this.skinList);
 
@@ -365,8 +379,23 @@ export class QuickAccessPanel {
                 eventBus.emit('pose:reset');
             });
             body.appendChild(resetBtn);
-        });
+        }, false);
         this.element.appendChild(playSection);
+
+        // ── TOOLS ────────────────────────────────────────────────────
+        // Everything beyond pick-animation / pick-skin / playback lives in one
+        // collapsible group; each tool starts collapsed so the panel stays short.
+        const toolsGroup = document.createElement('div');
+        toolsGroup.className = 'sv-tools-group';
+        const toolsHeader = document.createElement('div');
+        toolsHeader.className = 'sv-section-header sv-tools-header';
+        toolsHeader.innerHTML = '<span class="sv-section-arrow">\u25BC</span><span style="flex:1;letter-spacing:0.5px">TOOLS</span>';
+        this.wireCollapse(toolsHeader, 'TOOLS', false);
+        toolsGroup.appendChild(toolsHeader);
+        this.toolsBody = document.createElement('div');
+        this.toolsBody.className = 'sv-section-body sv-tools-body';
+        toolsGroup.appendChild(this.toolsBody);
+        this.element.appendChild(toolsGroup);
 
         // ── ANIMATION QUEUE ───────────────────────────────────────────
         const queueSection = this.makeSection('ANIMATION QUEUE', (body) => {
@@ -449,10 +478,10 @@ export class QuickAccessPanel {
 
             this.renderQueue();
         });
-        this.element.appendChild(queueSection);
+        this.toolsBody.appendChild(queueSection);
 
         // ── EVENT TRIGGERS ────────────────────────────────────────────
-        const triggerSection = this.makeSection('EVENT TRIGGERS', (body) => {
+        this.triggerSection = this.makeSection('EVENT TRIGGERS', (body) => {
             const helpText = document.createElement('div');
             helpText.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 0 6px';
             helpText.textContent = 'Play an animation when a custom event fires.';
@@ -531,7 +560,7 @@ export class QuickAccessPanel {
             this.triggerListEl.style.marginTop = '6px';
             body.appendChild(this.triggerListEl);
         });
-        this.element.appendChild(triggerSection);
+        this.toolsBody.appendChild(this.triggerSection);
 
         // ── VIEW ─────────────────────────────────────────────────────
         const viewSection = this.makeSection('VIEW', (body) => {
@@ -633,7 +662,7 @@ export class QuickAccessPanel {
             refRow.appendChild(refOpacity);
             body.appendChild(refRow);
         });
-        this.element.appendChild(viewSection);
+        this.toolsBody.appendChild(viewSection);
 
         // ── DEBUG DRAW ───────────────────────────────────────────────
         const debugSection = this.makeSection('DEBUG DRAW', (body) => {
@@ -674,7 +703,7 @@ export class QuickAccessPanel {
 
             body.appendChild(grid);
         });
-        this.element.appendChild(debugSection);
+        this.toolsBody.appendChild(debugSection);
 
         // ── ONION SKIN ───────────────────────────────────────────────
         const onionSection = this.makeSection('ONION SKIN', (body) => {
@@ -728,22 +757,57 @@ export class QuickAccessPanel {
             numRow('After', 'after', 0, 10);
             numRow('Frame step', 'step', 1, 30);
         });
-        this.element.appendChild(onionSection);
+        this.toolsBody.appendChild(onionSection);
     }
 
-    private makeSection(title: string, build: (body: HTMLElement) => void): HTMLElement {
+    /** Collapsible header whose open/closed state survives reloads. */
+    private wireCollapse(header: HTMLElement, key: string, collapsedByDefault: boolean): void {
+        const storageKey = `sv-section-collapsed:${key}`;
+        let collapsed = collapsedByDefault;
+        try {
+            const saved = localStorage.getItem(storageKey);
+            if (saved !== null) collapsed = saved === '1';
+        } catch {}
+        header.classList.toggle('collapsed', collapsed);
+        header.addEventListener('click', () => {
+            const now = header.classList.toggle('collapsed');
+            try { localStorage.setItem(storageKey, now ? '1' : '0'); } catch {}
+        });
+    }
+
+    /** Tool sections (inside TOOLS) start collapsed until the user opens them. */
+    private makeSection(title: string, build: (body: HTMLElement) => void, collapsedByDefault = true): HTMLElement {
         const section = document.createElement('div');
         section.className = 'sv-section';
         const header = document.createElement('div');
         header.className = 'sv-section-header';
         header.innerHTML = `<span class="sv-section-arrow">\u25BC</span><span style="flex:1;letter-spacing:0.5px">${title}</span>`;
-        header.addEventListener('click', () => header.classList.toggle('collapsed'));
+        this.wireCollapse(header, title, collapsedByDefault);
         section.appendChild(header);
         const body = document.createElement('div');
         body.className = 'sv-section-body';
         build(body);
         section.appendChild(body);
         return section;
+    }
+
+    private makeFilter(placeholder: string, onInput: () => void): HTMLInputElement {
+        const input = document.createElement('input');
+        input.type = 'search';
+        input.className = 'sv-tree-search sv-list-filter';
+        input.placeholder = placeholder;
+        input.addEventListener('input', onInput);
+        return input;
+    }
+
+    /** Hide list rows not matching the filter; the filter box itself only shows for long lists. */
+    private applyFilter(list: HTMLElement, input: HTMLInputElement): void {
+        const rows = [...list.children] as HTMLElement[];
+        input.style.display = rows.length > FILTER_MIN_ITEMS ? '' : 'none';
+        const q = input.value.trim().toLowerCase();
+        for (const row of rows) {
+            row.style.display = !q || (row.dataset.name ?? '').toLowerCase().includes(q) ? 'flex' : 'none';
+        }
     }
 
     private updateSkinHint(): void {
@@ -991,6 +1055,7 @@ export class QuickAccessPanel {
 
     private renderItem(container: HTMLElement, name: string, isActive: boolean, onSelect: () => void, cost?: AnimationCost): void {
         const row = document.createElement('div');
+        row.dataset.name = name;
         row.style.display = 'flex';
         row.style.alignItems = 'center';
         row.style.padding = '5px 10px';
@@ -1071,6 +1136,9 @@ export class QuickAccessPanel {
             const initial = project.currentSkin || project.skinNames[0];
             if (initial) this.currentSkins.add(initial);
         }
+
+        // Triggers need custom events; don't offer an empty form otherwise.
+        this.triggerSection.style.display = project.eventNames.length ? '' : 'none';
 
         // Populate trigger selects
         this.triggerEventSelect.innerHTML = '';
@@ -1167,6 +1235,8 @@ export class QuickAccessPanel {
             });
         });
 
+        this.applyFilter(this.animList, this.animFilter);
+        this.applyFilter(this.skinList, this.skinFilter);
         this.updateTrackPills();
     }
 }

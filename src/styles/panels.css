@@ -857,3 +857,24 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* ── Left panel: list filters + TOOLS group ─────────────────────── */
+.sv-list-filter {
+    display: block;
+    width: calc(100% - 16px);
+    margin: 4px 8px;
+    box-sizing: border-box;
+}
+
+.sv-tools-header {
+    background: var(--sv-bg-secondary);
+    border-top: 1px solid var(--sv-border);
+}
+
+.sv-tools-body {
+    padding: 0;
+}
+
+.sv-tools-body > .sv-section > .sv-section-header {
+    padding-left: 18px;
+}
