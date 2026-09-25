@@ -203,13 +203,16 @@
 /* Tabs */
 .sv-tabs {
     display: flex;
+    /* Wrap instead of overflowing: a narrow side panel must still show every tab. */
+    flex-wrap: wrap;
     border-bottom: 1px solid var(--sv-border);
     background: var(--sv-bg-secondary);
     flex-shrink: 0;
 }
 
 .sv-tab {
-    padding: 8px 14px;
+    padding: 8px 11px;
+    white-space: nowrap;
     font-size: var(--sv-font-size);
     color: var(--sv-text-muted);
     cursor: pointer;
