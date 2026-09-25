@@ -158,7 +158,10 @@ export class App {
 
         // Runtime cost sampling → timeline heatmap under the scrubber.
         this.viewport.ticker.add(() => this.sampleFrameCost());
-        eventBus.on('project:change', () => this.perfSampler.reset());
+        eventBus.on('project:change', () => {
+            this.perfSampler.reset();
+            this.setupHintShown = false; // re-measure the new skeleton's setup pose
+        });
 
         // Keyboard shortcuts
         this.setupKeyboardShortcuts();
@@ -454,9 +457,39 @@ export class App {
         }
     }
 
+    private setupHint: HTMLElement | null = null;
+    private setupHintShown = false;
+
+    /**
+     * Setup-pose hint: while a skeleton is loaded but no track plays, tell the user to
+     * pick an animation — many setup poses are empty, which otherwise looks like a failed load.
+     */
+    private updateSetupHint(): void {
+        const show = this.stateManager.mode !== 'comparison'
+            && !!this.stateManager.projectA
+            && !!this.spineManager.spine
+            && this.spineManager.getAllActiveTracks().length === 0;
+        if (show === this.setupHintShown) return;
+        this.setupHintShown = show;
+        if (!this.setupHint) {
+            this.setupHint = document.createElement('div');
+            this.setupHint.className = 'sv-setup-hint';
+            this.layout.viewport.appendChild(this.setupHint);
+        }
+        if (show) {
+            const bounds = this.spineManager.spine!.getLocalBounds();
+            const empty = !(bounds.width > 0 && bounds.height > 0);
+            this.setupHint.textContent = empty
+                ? 'Setup pose is empty — pick an animation in the left panel'
+                : 'Setup pose — pick an animation in the left panel';
+        }
+        this.setupHint.classList.toggle('sv-hidden', !show);
+    }
+
     private updateBottomBar(): void {
         // FPS
         this.layout.updateFPS(Math.round(this.viewport.ticker.FPS));
+        this.updateSetupHint();
 
         if (this.stateManager.mode === 'comparison') {
             const projects = this.comparisonPanel.getProjects();

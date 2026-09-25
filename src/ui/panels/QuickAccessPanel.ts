@@ -814,16 +814,11 @@ export class QuickAccessPanel {
         this.renderQueue();
         const p = this.queuePlayer.state;
         const name = p.running ? this.queueRunning[p.index] : '';
-        if (name) {
+        // Keep the chip and the list highlight in step with the queue.
+        if (name && name !== this.currentAnim) {
             this.currentAnim = name;
-            this.updateAnimTagOnly();
+            this.refresh();
         }
-    }
-
-    /** Keep the active-animation chip in step with the queue without a full refresh. */
-    private updateAnimTagOnly(): void {
-        const nameEl = this.animTag.querySelector('span > span:not(:last-child)');
-        if (nameEl) nameEl.textContent = this.currentAnim;
     }
 
     private renderQueue(): void {
@@ -1072,9 +1067,6 @@ export class QuickAccessPanel {
             ? `${this.currentSkins.size}/${project.skinNames.length}`
             : String(project.skinNames.length);
 
-        if (!this.currentAnim && project.animationNames.length > 0) {
-            this.currentAnim = project.animationNames[0];
-        }
         if (this.currentSkins.size === 0) {
             const initial = project.currentSkin || project.skinNames[0];
             if (initial) this.currentSkins.add(initial);

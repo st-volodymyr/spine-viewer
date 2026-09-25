@@ -112,5 +112,5 @@ class XyzPanel {
 - CSS custom properties use `--sv-*` prefix (`src/styles/variables.css`)
 - Spine files are parsed manually — **do not** use pixi-ext's URL-based loaders
 - Track 0 is the primary animation track; up to 12 tracks (0–11) are supported simultaneously
-- **No auto-play on load** — a loaded skeleton stays in setup pose until the user picks an animation. **Loop is off by default** (one-shot).
+- **No auto-play on load** — a loaded skeleton stays in setup pose until the user picks an animation; nothing is pre-selected in the animation list and no track chip shows until something plays. A `.sv-setup-hint` pill (App `updateSetupHint`) sits at the bottom of the canvas while no track is active ("Setup pose is empty" when the setup-pose bounds are zero). **Loop is off by default** (one-shot).
 - Keyboard shortcuts: `Space` pause, `R` reset pose (clears tracks), `←`/`→` frame step, `L`/`Shift+L` loop current/all, `+/-` zoom, `0` reset view

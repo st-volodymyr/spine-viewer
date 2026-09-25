@@ -208,6 +208,24 @@ body.sv-resizing-panels * {
     margin-top: 8px;
 }
 
+/* Setup-pose hint (skeleton loaded, nothing playing) */
+.sv-setup-hint {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 40;
+    padding: 4px 14px;
+    border-radius: 12px;
+    background: var(--sv-bg-secondary);
+    border: 1px solid var(--sv-border);
+    color: var(--sv-text-secondary);
+    font-size: var(--sv-font-size-sm);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.9;
+}
+
 /* ===== Active tracks bar (below viewport) ===== */
 .sv-tracks-bar {
     flex-shrink: 0;
