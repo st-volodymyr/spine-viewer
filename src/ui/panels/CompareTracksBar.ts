@@ -1,6 +1,6 @@
 import { eventBus } from '../../core/EventBus';
 import type { ComparisonPanel } from './ComparisonPanel';
-import { TrackBar, type TrackController } from './TrackBar';
+import { TrackBar, type TrackController, type TrackInfo } from './TrackBar';
 
 /**
  * Comparison-mode tracks bar — routes playback through ComparisonPanel so every
@@ -10,7 +10,18 @@ export class CompareTracksBar {
     private bar: TrackBar;
 
     constructor(mountPoint: HTMLElement, private comparisonPanel: ComparisonPanel) {
-        const master = () => this.comparisonPanel.getProjects()[0]?.manager ?? null;
+        const managers = () => this.comparisonPanel.getProjects().map(p => p.manager);
+        // A track index is shown if ANY project plays it (the first project may lack
+        // an animation that only exists in another one); first project wins per index.
+        const activeTracks = () => {
+            const byIndex = new Map<number, TrackInfo>();
+            for (const m of managers()) {
+                for (const t of m.getAllActiveTracks()) {
+                    if (!byIndex.has(t.trackIndex)) byIndex.set(t.trackIndex, t);
+                }
+            }
+            return [...byIndex.values()].sort((a, b) => a.trackIndex - b.trackIndex);
+        };
 
         const controller: TrackController = {
             getAnimationNames: () => {
@@ -18,12 +29,12 @@ export class CompareTracksBar {
                 this.comparisonPanel.getProjects().forEach(p => p.manager.getAnimationNames().forEach(a => set.add(a)));
                 return [...set];
             },
-            getActiveTracks: () => master()?.getAllActiveTracks() ?? [],
-            getSpeed: () => master()?.getSpeed?.() ?? 1,
+            getActiveTracks: activeTracks,
+            getSpeed: () => managers()[0]?.getSpeed?.() ?? 1,
             setAnimation: (i, n, l) => this.comparisonPanel.playAnimation(n, i, l),
             setTrackLoop: (i, l) => this.comparisonPanel.setTrackLoop(i, l),
             clearTrack: (i) => this.comparisonPanel.clearTrack(i),
-            getTrackInfo: (i) => master()?.getCurrentTrackInfo(i) ?? null,
+            getTrackInfo: (i) => activeTracks().find(t => t.trackIndex === i) ?? null,
         };
 
         this.bar = new TrackBar(mountPoint, controller);

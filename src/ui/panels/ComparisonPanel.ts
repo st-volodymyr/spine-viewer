@@ -34,6 +34,10 @@ export class ComparisonPanel {
     private lastSpeed = 1;
     private lastSkin: string | null = null;
 
+    // Which two projects the diff compares (indices into `projects`); pickable when 3+ are loaded.
+    private diffA = 0;
+    private diffB = 1;
+
     // PixiJS overlays
     private dividers: Graphics[] = [];
     private labels: Text[] = [];
@@ -86,6 +90,15 @@ export class ComparisonPanel {
         resizeObserver.observe(canvas.parentElement!);
     }
 
+    /** Same-named skeletons (e.g. two versions of one export) get a "#2", "#3" suffix so labels stay distinguishable. */
+    private uniqueName(base: string): string {
+        const taken = new Set(this.projects.map(p => p.name));
+        if (!taken.has(base)) return base;
+        let i = 2;
+        while (taken.has(`${base} #${i}`)) i++;
+        return `${base} #${i}`;
+    }
+
     getProjects(): ComparisonProject[] {
         return this.projects;
     }
@@ -103,7 +116,8 @@ export class ComparisonPanel {
     }
 
     /** Add an already-loaded SpineManager as a comparison project (borrowed — do not destroy on remove) */
-    addBorrowedProject(name: string, manager: SpineManager): void {
+    addBorrowedProject(baseName: string, manager: SpineManager): void {
+        const name = this.uniqueName(baseName);
         manager.displayName = name;
         const project: ComparisonProject = { name, manager, borrowed: true };
         this.projects.push(project);
@@ -160,14 +174,15 @@ export class ComparisonPanel {
             const result = await parseSpineFiles(fileSet, versionInfo.detected === '4.1' ? '4.1' : '4.2');
 
             const manager = new SpineManager(this.viewport);
-            manager.displayName = fileSet.skeleton.name;
+            const name = this.uniqueName(fileSet.skeleton.name);
+            manager.displayName = name;
             if (result.runtimeVersion === '4.1') {
                 manager.createSpine41(result.skeletonData as any);
             } else {
                 manager.createSpine(result.projectName);
             }
 
-            const project: ComparisonProject = { name: fileSet.skeleton.name, manager };
+            const project: ComparisonProject = { name, manager };
             this.syncNewProjectToActive(manager);
             this.projects.push(project);
 
@@ -184,7 +199,7 @@ export class ComparisonPanel {
                 atlas: parsedAtlas,
                 textures: fileSet.textures,
                 usedRegionNames: new Set<string>(),
-                projectName: fileSet.skeleton.name,
+                projectName: name,
             });
 
             eventBus.emit('comparison:projects-changed', this.projects);
@@ -329,14 +344,15 @@ export class ComparisonPanel {
                 const result = await parseSpineFiles(fileSet, versionInfo.detected === '4.1' ? '4.1' : '4.2');
 
                 const manager = new SpineManager(this.viewport);
-                manager.displayName = fileSet.skeleton.name;
+                const name = this.uniqueName(fileSet.skeleton.name);
+                manager.displayName = name;
                 if (result.runtimeVersion === '4.1') {
                     manager.createSpine41(result.skeletonData as any);
                 } else {
                     manager.createSpine(result.projectName);
                 }
 
-                const project: ComparisonProject = { name: fileSet.skeleton.name, manager };
+                const project: ComparisonProject = { name, manager };
                 this.syncNewProjectToActive(manager);
                 this.projects.push(project);
 
@@ -353,7 +369,7 @@ export class ComparisonPanel {
                     atlas: parsedAtlas,
                     textures: fileSet.textures,
                     usedRegionNames: new Set<string>(),
-                    projectName: fileSet.skeleton.name,
+                    projectName: name,
                 });
 
                 eventBus.emit('comparison:projects-changed', this.projects);
@@ -496,13 +512,48 @@ export class ComparisonPanel {
             return;
         }
 
-        const diff = this.engine.getStructuredDiff(0, 1);
+        const n = this.projects.length;
+        if (this.diffA >= n) this.diffA = 0;
+        if (this.diffB >= n || this.diffB === this.diffA) this.diffB = this.diffA === 0 ? 1 : 0;
+        if (n > 2) this.renderDiffPairPicker();
+
+        const diff = this.engine.getStructuredDiff(this.diffA, this.diffB);
         this.renderDiffTable(diff);
     }
 
+    /** "Diff [A] vs [B]" selectors — the diff is pairwise, so with 3+ projects the user picks the pair. */
+    private renderDiffPairPicker(): void {
+        const bar = document.createElement('div');
+        bar.className = 'sv-diff-pair';
+        const makeSelect = (value: number, onPick: (idx: number) => void): HTMLSelectElement => {
+            const sel = document.createElement('select');
+            sel.className = 'sv-select';
+            this.projects.forEach((p, i) => {
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = p.name;
+                sel.appendChild(opt);
+            });
+            sel.value = String(value);
+            sel.addEventListener('change', () => { onPick(Number(sel.value)); this.updateDiff(); });
+            return sel;
+        };
+        const label = document.createElement('span');
+        label.textContent = 'Diff';
+        const vs = document.createElement('span');
+        vs.textContent = 'vs';
+        bar.append(
+            label,
+            makeSelect(this.diffA, i => { if (i === this.diffB) this.diffB = this.diffA; this.diffA = i; }),
+            vs,
+            makeSelect(this.diffB, i => { if (i === this.diffA) this.diffA = this.diffB; this.diffB = i; }),
+        );
+        this.diffContainer.appendChild(bar);
+    }
+
     private renderDiffTable(diff: StructuredDiff): void {
-        const nameA = this.projects[0]?.name ?? 'Project A';
-        const nameB = this.projects[1]?.name ?? 'Project B';
+        const nameA = this.projects[this.diffA]?.name ?? 'Project A';
+        const nameB = this.projects[this.diffB]?.name ?? 'Project B';
 
         // Summary cards
         const summaryRow = document.createElement('div');
@@ -679,7 +730,7 @@ export class ComparisonPanel {
     }
 
     private appendDurationSection(): void {
-        const d = this.engine.getDurationDiff(0, 1);
+        const d = this.engine.getDurationDiff(this.diffA, this.diffB);
         const minor = d.changed.length - d.flagged;
         const badgeText = d.flagged ? `${d.flagged} > 1 frame` : minor ? `${minor} sub-frame` : 'no differences';
         const body = this.createDeepSection(
@@ -718,7 +769,7 @@ export class ComparisonPanel {
     }
 
     private appendEventTimingSection(nameA: string, nameB: string): void {
-        const d = this.engine.getEventTimingDiff(0, 1);
+        const d = this.engine.getEventTimingDiff(this.diffA, this.diffB);
         const missing = d.anims.reduce((n, a) => n + a.changes.filter(c => c.kind !== 'changed').length, 0);
         const { severity, text } = this.cdiffBadge(d.issues, missing);
         const body = this.createDeepSection(
@@ -760,7 +811,7 @@ export class ComparisonPanel {
     }
 
     private appendConstraintSection(nameA: string, nameB: string): void {
-        const d = this.engine.getConstraintDiff(0, 1);
+        const d = this.engine.getConstraintDiff(this.diffA, this.diffB);
         const missing = d.onlyA.length + d.onlyB.length;
         const issues = missing + d.changed.length;
         const { severity, text } = this.cdiffBadge(issues, missing);
@@ -782,7 +833,7 @@ export class ComparisonPanel {
     }
 
     private appendSlotSetupSection(): void {
-        const d = this.engine.getSlotSetupDiff(0, 1);
+        const d = this.engine.getSlotSetupDiff(this.diffA, this.diffB);
         const issues = d.changed.length;
         const { severity, text } = this.cdiffBadge(issues, 0);
         const body = this.createDeepSection(
@@ -797,7 +848,7 @@ export class ComparisonPanel {
     }
 
     private appendReskinSection(nameA: string, nameB: string): void {
-        const reskin = this.engine.getReskinDiff(0, 1);
+        const reskin = this.engine.getReskinDiff(this.diffA, this.diffB);
         const issues = reskin.onlyA.length + reskin.onlyB.length + reskin.mismatches.length;
 
         const section = document.createElement('div');

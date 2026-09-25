@@ -74,7 +74,7 @@ export class ComparisonControlPanel {
             loopLabel.style.marginLeft = '8px';
             this.loopToggle = document.createElement('input');
             this.loopToggle.type = 'checkbox';
-            this.loopToggle.checked = true;
+            this.loopToggle.checked = false; // same default as single mode (one-shot)
             const loopTrack = document.createElement('span');
             loopTrack.className = 'sv-toggle-track';
             loopLabel.appendChild(this.loopToggle);
@@ -194,7 +194,7 @@ export class ComparisonControlPanel {
         }
 
         // Mark currently-playing animation as active
-        const currentAnim = projects[0]?.manager.getCurrentTrackInfo(0)?.name;
+        const currentAnim = projects.map(p => p.manager.getCurrentTrackInfo(0)?.name).find(Boolean);
         if (currentAnim) {
             this.animListEl.querySelectorAll('.sv-compare-anim-row').forEach(r => {
                 const nameSpan = r.querySelector('.sv-compare-anim-name');

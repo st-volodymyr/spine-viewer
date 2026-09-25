@@ -166,7 +166,7 @@ export class Layout {
         // Add Project button (visible only in compare mode)
         this.addProjectBtn = document.createElement('button');
         this.addProjectBtn.className = 'sv-btn sv-btn-sm';
-        this.addProjectBtn.textContent = '+ Add';
+        this.addProjectBtn.textContent = '+ Add Project';
         this.addProjectBtn.title = 'Add spine project to comparison';
         this.addProjectBtn.id = 'sv-toolbar-add-project';
         this.addProjectBtn.style.display = 'none';

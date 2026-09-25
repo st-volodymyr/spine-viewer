@@ -140,7 +140,7 @@
 .sv-canvas-toast-project {
     font-size: 10px;
     opacity: 0.8;
-    max-width: 80px;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     border-right: 1px solid rgba(255, 255, 255, 0.4);
@@ -220,6 +220,20 @@
 }
 
 /* Legend */
+.sv-diff-pair {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0;
+    font-size: var(--sv-font-size-sm);
+    color: var(--sv-text-muted);
+}
+
+.sv-diff-pair .sv-select {
+    flex: 1;
+    min-width: 0;
+}
+
 .sv-diff-legend {
     display: flex;
     gap: 10px;
