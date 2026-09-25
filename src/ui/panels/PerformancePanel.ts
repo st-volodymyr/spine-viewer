@@ -72,9 +72,10 @@ export class PerformancePanel {
         panel.style.cssText = `
             display:none;
             position:fixed;
-            top:48px;
-            left:50%;
-            transform:translateX(-50%);
+            top:56px;
+            right:calc(var(--sv-right-panel-width) + 8px);
+            max-height:calc(100vh - 160px);
+            overflow-y:auto;
             z-index:5000;
             background:var(--sv-bg-surface);
             border:1px solid var(--sv-border);

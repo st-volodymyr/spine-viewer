@@ -5,6 +5,9 @@ import type { SpineManager } from '../../core/SpineManager';
 import type { StateManager } from '../../core/StateManager';
 import type { Container } from '@electricelephants/pixi-ext';
 
+const MARKER_SIZE = 12;
+const MARKER_LABEL = 'sv-marker-label';
+
 interface PlaceholderEntry {
     slotName: string;
     marker: Graphics | null;
@@ -505,7 +508,7 @@ export class PlaceholderPanel {
 
         const g = new Graphics();
         g.zIndex = 999;
-        const size = 12;
+        const size = MARKER_SIZE;
         g.lineStyle(2, 0xff6600, 0.9);
         g.moveTo(-size, 0); g.lineTo(size, 0);
         g.moveTo(0, -size); g.lineTo(0, size);
@@ -516,7 +519,11 @@ export class PlaceholderPanel {
             fontSize: 9, fill: '#ff8800', fontFamily: 'Arial',
             fontWeight: 'bold', stroke: '#000000', strokeThickness: 2,
         } as any);
-        labelText.position.set(size + 3, -5);
+        // Above the crosshair (not beside it) so it doesn't sit on centred overlay content;
+        // applyFollow lifts it above the content's top edge when the slot has an overlay.
+        labelText.anchor.set(0.5, 1);
+        labelText.position.set(0, -size - 3);
+        labelText.name = MARKER_LABEL;
         g.addChild(labelText);
 
         // Place at current bone position
@@ -562,13 +569,31 @@ export class PlaceholderPanel {
             const slot = spine.skeleton.findSlot(entry.slotName);
             const bone = slot?.bone;
             if (!bone) return;
-            entry.marker?.position.set(bone.worldX, bone.worldY);
+            if (entry.marker) {
+                entry.marker.position.set(bone.worldX, bone.worldY);
+                this.placeMarkerLabel(entry.marker, entry.contentSprite ?? entry.contentText);
+            }
             // Content parented to the slot container is positioned by Pixi already.
             if (!entry.container) {
                 entry.contentSprite?.position.set(bone.worldX, bone.worldY);
                 entry.contentText?.position.set(bone.worldX, bone.worldY);
             }
         });
+    }
+
+    /** Keep the marker's slot-name label clear of the overlay content drawn at the same bone. */
+    private placeMarkerLabel(marker: Graphics, content: Sprite | Text | null): void {
+        const label = marker.getChildByName(MARKER_LABEL) as Text | null;
+        if (!label) return;
+        let y = -MARKER_SIZE - 3;
+        if (content && !content.destroyed && content.visible) {
+            const b = content.getBounds();
+            // Global bounds → marker space (min of both edges handles a flipped skeleton).
+            const top = marker.toLocal({ x: b.x, y: b.y } as any).y;
+            const bottom = marker.toLocal({ x: b.x, y: b.y + b.height } as any).y;
+            y = Math.min(y, Math.min(top, bottom) - 3);
+        }
+        label.y = y;
     }
 
     private setTextContentFor(slotName: string, text: string, style: { fontSize: number; fill: string; stroke?: string; strokeThickness?: number; fontFamily?: string; fontWeight?: string; fontStyle?: string }, manager: SpineManager, entries: Entries): void {

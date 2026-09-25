@@ -192,13 +192,19 @@ function buildConstraintList(data: SkeletonData): TreeNode[] {
     return nodes;
 }
 
+/** Setup-pose AABB size, rounded (the raw floats carry ~15 decimals). */
+function formatSize(v: number | undefined): string {
+    return typeof v === 'number' && isFinite(v) ? String(Math.round(v * 100) / 100) : '(unknown)';
+}
+
 function buildInfo(data: SkeletonData): Record<string, string> {
     return {
-        'Name': data.name ?? '(unnamed)',
+        // Binary exports don't store the skeleton name.
+        'Name': data.name || '(not stored in export)',
         'Version': data.version ?? '(unknown)',
         'Hash': data.hash ?? '',
-        'Width': String(data.width),
-        'Height': String(data.height),
+        'Width': formatSize(data.width),
+        'Height': formatSize(data.height),
         'Bones': String(data.bones.length),
         'Slots': String(data.slots.length),
         'Skins': String(data.skins.length),

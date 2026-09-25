@@ -48,6 +48,26 @@ html, body, #app {
     transition: background 0.15s;
 }
 
+/* Grip pill at mid-height so the handle is discoverable without hovering */
+.sv-panel-resizer::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    width: 3px;
+    height: 28px;
+    margin-top: -14px;
+    border-radius: 2px;
+    background: var(--sv-text-muted);
+    opacity: 0.35;
+    transition: opacity 0.15s;
+}
+
+.sv-panel-resizer:hover::before,
+.sv-panel-resizer.sv-dragging::before {
+    opacity: 0;
+}
+
 .sv-panel-resizer:hover::after,
 .sv-panel-resizer.sv-dragging::after {
     left: 2px;

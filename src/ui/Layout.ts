@@ -161,7 +161,7 @@ export class Layout {
         openBtn.className = 'sv-btn sv-btn-primary';
         openBtn.id = 'sv-toolbar-open-btn';
         openBtn.textContent = 'Open';
-        openBtn.title = 'Open spine files or folder';
+        openBtn.title = 'Open spine files: skeleton (.json/.skel) + .atlas + textures, or a .spine archive';
         this.toolbar.appendChild(openBtn);
 
         // Add Project button (visible only in compare mode)
@@ -222,18 +222,19 @@ export class Layout {
         // Reset view
         const resetBtn = document.createElement('button');
         resetBtn.className = 'sv-btn sv-btn-sm';
-        resetBtn.textContent = 'Reset';
-        resetBtn.title = 'Re-center the viewport (keyboard: 0)';
+        resetBtn.textContent = 'Reset view';
+        resetBtn.title = 'Re-center the viewport at 1× zoom (keyboard: 0; F fits the skeleton)';
         resetBtn.addEventListener('click', () => {
             eventBus.emit('viewport:reset');
         });
         this.toolbar.appendChild(resetBtn);
 
-        // Clear All
+        // Unload everything (destructive → kept apart from the view reset)
+        this.toolbar.appendChild(this.createSeparator());
         const clearBtn = document.createElement('button');
-        clearBtn.className = 'sv-btn sv-btn-sm';
-        clearBtn.textContent = 'Clear';
-        clearBtn.title = 'Unload current spine and reset';
+        clearBtn.className = 'sv-btn sv-btn-sm sv-btn-danger';
+        clearBtn.textContent = 'Unload';
+        clearBtn.title = 'Unload all spines and reload the viewer';
         clearBtn.addEventListener('click', () => {
             if (confirm('Clear all and reload?')) {
                 window.location.reload();

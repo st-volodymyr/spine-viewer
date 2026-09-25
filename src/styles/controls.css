@@ -33,6 +33,23 @@
     border-color: var(--sv-accent-hover);
 }
 
+.sv-btn:disabled,
+.sv-btn:disabled:hover {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: var(--sv-bg-surface);
+    border-color: var(--sv-border);
+    color: var(--sv-text-muted);
+}
+
+.sv-btn-danger {
+    color: var(--sv-error, #d33);
+}
+
+.sv-btn-danger:hover {
+    border-color: var(--sv-error, #d33);
+}
+
 .sv-btn-sm {
     padding: 3px 10px;
     font-size: var(--sv-font-size-sm);
