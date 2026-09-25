@@ -329,7 +329,7 @@ export class App {
         const subtext = document.createElement('div');
         subtext.style.fontSize = 'var(--sv-font-size-sm)';
         subtext.style.color = 'var(--sv-text-muted)';
-        subtext.textContent = 'Supports .json, .skel, .atlas, .png, .jpg, .avif, .spine';
+        subtext.textContent = 'Supports .json, .skel, .atlas, .png, .jpg, .webp, .avif, .spine';
         this.dropZone.appendChild(subtext);
 
         const buttons = document.createElement('div');

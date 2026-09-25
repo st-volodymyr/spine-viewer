@@ -54,25 +54,35 @@ async function parseSpineFiles41(fileSet: SpineFileSet, projectName: string): Pr
     // before the `const a = ...` assignment completes.
     const tempAtlas = new TextureAtlas(fileSet.atlas.data);
     const pageMetaMap = new Map(tempAtlas.pages.map(p => [p.name, p]));
+    const findTexture = (pageName: string) => fileSet.textures.find(t =>
+        t.name === pageName ||
+        t.name.toLowerCase() === pageName.toLowerCase()
+    );
 
-    // Build TextureAtlas using @pixi-spine/base's callback-based API
-    const atlas = await new Promise<TextureAtlas41>((resolve) => {
+    // The 4.1 runtime reports a missing page by calling the completion callback with null
+    // (synchronously, from inside the constructor) — fail early with a readable message instead.
+    const missing = tempAtlas.pages.map(p => p.name).filter(name => !findTexture(name));
+    if (missing.length > 0) {
+        const available = fileSet.textures.map(t => t.name).join(', ') || 'none';
+        const pages = missing.map(n => `'${n}'`).join(', ');
+        throw new Error(`Atlas page${missing.length > 1 ? 's' : ''} ${pages} missing (loaded textures: ${available})`);
+    }
+
+    // Build TextureAtlas using @pixi-spine/base's callback-based API. Every page is present, so the
+    // loader resolves synchronously and the completion callback always receives the atlas.
+    const atlas = await new Promise<TextureAtlas41>((resolve, reject) => {
+        let done = false;
         const a = new TextureAtlas41(fileSet.atlas.data, (pageName, loaderFn) => {
-            const tex = fileSet.textures.find(t =>
-                t.name === pageName ||
-                t.name.toLowerCase() === pageName.toLowerCase()
-            );
-            if (tex) {
-                const page = pageMetaMap.get(pageName);
-                const alphaMode = page?.pma ? ALPHA_MODES.PMA : ALPHA_MODES.PREMULTIPLY_ON_UPLOAD;
-                loaderFn(new BaseTexture(tex.data, { alphaMode }));
-            } else {
-                console.warn(`SpineParser41: texture "${pageName}" not found, available: ${fileSet.textures.map(t => t.name).join(', ')}`);
-                loaderFn(null as any);
-            }
-        }, (loadedAtlas) => resolve(loadedAtlas ?? a));
+            const page = pageMetaMap.get(pageName);
+            const alphaMode = page?.pma ? ALPHA_MODES.PMA : ALPHA_MODES.PREMULTIPLY_ON_UPLOAD;
+            loaderFn(new BaseTexture(findTexture(pageName)!.data, { alphaMode }));
+        }, (loadedAtlas) => {
+            done = true;
+            if (loadedAtlas) resolve(loadedAtlas);
+            else reject(new Error('Atlas failed to load'));
+        });
         // If no pages trigger the callback (empty atlas), resolve immediately
-        if (a.pages.length === 0) resolve(a);
+        if (!done) resolve(a);
     });
 
     const attachmentLoader = new AtlasAttachmentLoader41(atlas);
