@@ -35,13 +35,16 @@ type AnySpine = SpineElement | Spine41;
  * AABB of the region/mesh attachments that actually show in the current pose. Unlike
  * `Skeleton.getBounds` it skips transparent slots (hidden pop-ups/glows parked at alpha 0)
  * and duck-types attachments instead of using `instanceof` (see SkeletonDebug).
+ * `solidOnly` also skips non-normal blend slots: additive/screen rays and glows often
+ * scale far past the art (full-screen FX) and would shrink any fit to a dot.
  */
-function visibleSkeletonBounds(skeleton: any): { minX: number; minY: number; maxX: number; maxY: number } | null {
+function visibleSkeletonBounds(skeleton: any, solidOnly = false): { minX: number; minY: number; maxX: number; maxY: number } | null {
     if ((skeleton.color?.a ?? 1) <= 0.01) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const v: number[] = [];
     for (const slot of (skeleton.drawOrder ?? skeleton.slots ?? []) as any[]) {
         if (!slot?.bone?.active || (slot.color?.a ?? 1) <= 0.01) continue;
+        if (solidOnly && (slot.data?.blendMode ?? 0) !== 0) continue;
         const att = slot.getAttachment?.() ?? slot.attachment;
         if (!att || typeof att.computeWorldVertices !== 'function' || (att.color?.a ?? 1) <= 0.01) continue;
         let n = 0;
@@ -148,28 +151,51 @@ export class SpineManager {
      * Bounds to frame the skeleton, in the spine's parent (viewport wrapper) space.
      * While something plays: the current pose. In setup pose (often empty): the union of
      * the setup pose and poses sampled across every animation, posed on a detached clone
-     * so the live state is untouched. Null when there is nothing visible to frame.
+     * so the live state is untouched. `layoutAnims` gives frame-independent bounds for
+     * layout (the compare grid): setup pose + poses sampled from those animations only
+     * (all animations if none of them exist here). Null when nothing visible to frame.
      */
-    getFitBounds(): { x: number; y: number; width: number; height: number } | null {
+    getFitBounds(layoutAnims?: string[]): { x: number; y: number; width: number; height: number } | null {
         const spine = this.spine as any;
         if (!spine) return null;
-        const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-        const addSkeleton = (skeleton: any) => {
-            const b = visibleSkeletonBounds(skeleton);
+        // Frame the solid (normal-blend) art; fall back to everything visible if it's all FX.
+        const solid = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+        const all = { ...solid };
+        const grow = (box: typeof solid, b: typeof solid | null) => {
             if (!b) return;
             box.minX = Math.min(box.minX, b.minX);
             box.minY = Math.min(box.minY, b.minY);
             box.maxX = Math.max(box.maxX, b.maxX);
             box.maxY = Math.max(box.maxY, b.maxY);
         };
+        const addSkeleton = (skeleton: any) => {
+            grow(solid, visibleSkeletonBounds(skeleton, true));
+            grow(all, visibleSkeletonBounds(skeleton));
+        };
 
-        addSkeleton(spine.skeleton);
-        const animations: any[] = (this.spineData as any)?.animations ?? [];
-        if (this.getAllActiveTracks().length === 0 && animations.length > 0) {
+        const stable = layoutAnims !== undefined;
+        const allAnims: any[] = (this.spineData as any)?.animations ?? [];
+        let animations = allAnims;
+        if (stable) {
+            // Requested anims this skeleton has → else whatever it plays now → else setup
+            // pose alone (all animations only if the setup pose is empty too, see below).
+            const own = allAnims.filter(a => layoutAnims.includes(a.name));
+            const playing = new Set(this.getAllActiveTracks().map(t => t.name));
+            animations = own.length ? own : allAnims.filter(a => playing.has(a.name));
+        }
+        const sample = stable || this.getAllActiveTracks().length === 0;
+        if (!stable) addSkeleton(spine.skeleton);
+        if (sample && (animations.length > 0 || stable)) {
             const clone = this.cloneSpine() as any;
             if (clone) {
                 clone.skeleton.setSkin(spine.skeleton.skin);
                 clone.skeleton.setSlotsToSetupPose();
+                if (stable) {
+                    clone.skeleton.setToSetupPose();
+                    clone.state.clearTracks();
+                    clone.update(0);
+                    addSkeleton(clone.skeleton);
+                }
                 // Cap total pose evaluations so huge skeletons stay responsive.
                 const samples = Math.max(2, Math.min(6, Math.floor(240 / animations.length)));
                 for (const anim of animations) {
@@ -187,6 +213,10 @@ export class SpineManager {
                 clone.destroy();
             }
         }
+        if (stable && !isFinite(all.minX) && animations.length === 0 && allAnims.length > 0) {
+            return this.getFitBounds([...allAnims.map(a => a.name)]);
+        }
+        const box = isFinite(solid.minX) ? solid : all;
         if (!isFinite(box.minX)) return null;
 
         // Skeleton space → parent space (spine position, scale and flip).

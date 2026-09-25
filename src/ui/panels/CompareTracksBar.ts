@@ -3,8 +3,9 @@ import type { ComparisonPanel } from './ComparisonPanel';
 import { TrackBar, type TrackController, type TrackInfo } from './TrackBar';
 
 /**
- * Comparison-mode tracks bar — routes playback through ComparisonPanel so every
- * loaded project stays in sync. No scrub/step/heatmap (ambiguous across N spines).
+ * Comparison-mode tracks bar — a shared timeline: playback, scrub and frame-step
+ * go through ComparisonPanel to every project, at the same absolute time (so
+ * versions with different durations line up frame by frame). No heatmap.
  */
 export class CompareTracksBar {
     private bar: TrackBar;
@@ -35,6 +36,10 @@ export class CompareTracksBar {
             setTrackLoop: (i, l) => this.comparisonPanel.setTrackLoop(i, l),
             clearTrack: (i) => this.comparisonPanel.clearTrack(i),
             getTrackInfo: (i) => activeTracks().find(t => t.trackIndex === i) ?? null,
+            seekToPaused: (i, t) => this.comparisonPanel.seekAll(i, t),
+            stepFrame: (i, d) => this.comparisonPanel.stepAll(i, d),
+            onPause: () => eventBus.emit('compare:paused-changed', true),
+            getEventMarkers: (name) => managers().find(m => m.getAnimationNames().includes(name))?.getEventKeys(name) ?? [],
         };
 
         this.bar = new TrackBar(mountPoint, controller);

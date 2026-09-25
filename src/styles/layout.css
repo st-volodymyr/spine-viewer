@@ -336,6 +336,7 @@ body.sv-resizing-panels * {
 }
 
 .sv-track-row-progress {
+    position: relative; /* anchors event-marker ticks (also without the heat variant) */
     flex: 1 0 160px;
     min-width: 160px;
     height: 10px;

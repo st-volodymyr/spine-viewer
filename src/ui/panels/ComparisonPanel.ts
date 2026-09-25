@@ -84,7 +84,7 @@ export class ComparisonPanel {
         const canvas = viewport.app.view as HTMLCanvasElement;
         const resizeObserver = new ResizeObserver(() => {
             if (this.comparisonActive && this.projects.length > 0) {
-                this.arrangeProjects();
+                this.arrangeProjects(false);
             }
         });
         resizeObserver.observe(canvas.parentElement!);
@@ -209,12 +209,15 @@ export class ComparisonPanel {
     }
 
     playAnimation(name: string, trackIndex = 0, loop = true): void {
+        const prev = this.lastTracks.get(trackIndex)?.name;
         this.lastTracks.set(trackIndex, { name, loop });
         this.projects.forEach(p => {
             if (p.manager.getAnimationNames().includes(name)) {
                 p.manager.setAnimation(trackIndex, name, loop);
             }
         });
+        // New animation → cells re-fit to its extent.
+        if (this.comparisonActive && prev !== name) this.arrangeProjects(true);
     }
 
     setSkin(name: string): void {
@@ -224,6 +227,7 @@ export class ComparisonPanel {
                 p.manager.setSkin(name);
             }
         });
+        if (this.comparisonActive) this.arrangeProjects(false);
     }
 
     setAllSpeed(speed: number): void {
@@ -233,6 +237,21 @@ export class ComparisonPanel {
 
     setAllPaused(paused: boolean): void {
         this.projects.forEach(p => p.manager.setPaused(paused));
+    }
+
+    /** Pause every project and put the track at the same absolute time. */
+    seekAll(trackIndex: number, time: number): void {
+        this.projects.forEach(p => p.manager.seekToPaused(trackIndex, time));
+    }
+
+    /** Frame-step from the first project that plays the track; others follow to the same time. */
+    stepAll(trackIndex: number, dir: 1 | -1): void {
+        const lead = this.projects.find(p => p.manager.getCurrentTrackInfo(trackIndex));
+        if (!lead) return;
+        lead.manager.stepFrame(trackIndex, dir);
+        const time = lead.manager.getCurrentTrackInfo(trackIndex)?.time;
+        if (time === undefined) return;
+        this.projects.forEach(p => { if (p !== lead) p.manager.seekToPaused(trackIndex, time); });
     }
 
     setTrackLoop(trackIndex: number, loop: boolean): void {
@@ -386,51 +405,99 @@ export class ComparisonPanel {
         this.engine.setManagers(this.projects.map(p => p.manager));
     }
 
-    private arrangeProjects(): void {
-        // Clear old overlays
+    /**
+     * Compare layout: one grid cell per project, all at the SAME scale (so sizes
+     * stay comparable). Cell = the largest project's stable bounds + padding; the
+     * column count is picked to best fill the canvas aspect. With `fit`, the view
+     * zooms to frame the whole grid (on add/remove, mode switch, F key).
+     */
+    private arrangeProjects(fit = true): void {
         this.clearOverlays();
 
-        const count = this.projects.length;
+        const placed = this.projects.filter(p => p.manager.spine);
+        const count = placed.length;
         if (count === 0) return;
 
-        const screenW = this.viewport.app.screen.width;
-        const zoom = this.viewport.wrapper.scale.x || 1;
-        const columnWidth = screenW / (count * zoom);
-
-        this.projects.forEach((project, idx) => {
-            if (project.manager.spine) {
-                const x = (idx - (count - 1) / 2) * columnWidth;
-                project.manager.spine.x = x;
-
-                // Add label above spine
-                const label = new Text(project.name, this.labelStyle);
-                label.anchor.set(0.5, 1);
-                label.x = x;
-                label.y = -350;
-                label.zIndex = 9000;
-                label.scale.set(1 / zoom);
-                this.viewport.wrapper.addChild(label);
-                this.labels.push(label);
-
-                // Add divider between columns (not after last)
-                if (idx < count - 1) {
-                    const midX = (idx - (count - 1) / 2 + 0.5) * columnWidth;
-                    const divider = new Graphics();
-                    divider.zIndex = 9000;
-                    // Draw dashed vertical line
-                    const dashLen = 20;
-                    const gapLen = 10;
-                    const lineHeight = 800;
-                    divider.lineStyle(2, 0x666666, 0.4);
-                    for (let y = -lineHeight / 2; y < lineHeight / 2; y += dashLen + gapLen) {
-                        divider.moveTo(midX, y);
-                        divider.lineTo(midX, Math.min(y + dashLen, lineHeight / 2));
-                    }
-                    this.viewport.wrapper.addChild(divider);
-                    this.dividers.push(divider);
-                }
-            }
+        // Cells are sized for what is being compared: the synced animations (all if none).
+        const layoutAnims = [...this.lastTracks.values()].map(t => t.name);
+        // Bounds relative to each spine's own origin (independent of where it sits now).
+        const local = placed.map(p => {
+            const spine = p.manager.spine!;
+            const b = p.manager.getFitBounds(layoutAnims);
+            return b
+                ? { x: b.x - spine.x, y: b.y - spine.y, width: b.width, height: b.height }
+                : { x: -100, y: -100, width: 200, height: 200 };
         });
+        const pad = 1.15;
+        const cellW = Math.max(...local.map(b => b.width)) * pad;
+        // Extra headroom at the top of each cell for the project label.
+        const labelBand = Math.max(...local.map(b => b.height)) * 0.12;
+        const cellH = Math.max(...local.map(b => b.height)) * pad + labelBand;
+
+        const { width: screenW, height: screenH } = this.viewport.app.screen;
+        let cols = 1;
+        let best = 0;
+        for (let c = 1; c <= count; c++) {
+            const rows = Math.ceil(count / c);
+            const zoom = Math.min(screenW / (c * cellW), screenH / (rows * cellH));
+            if (zoom > best * 1.001) { best = zoom; cols = c; }
+        }
+        const rows = Math.ceil(count / cols);
+        const gridW = cols * cellW;
+        const gridH = rows * cellH;
+        const left = -gridW / 2;
+        const top = -gridH / 2;
+        const zoom = this.viewport.wrapper.scale.x || 1;
+
+        placed.forEach((project, idx) => {
+            const spine = project.manager.spine!;
+            const b = local[idx];
+            const col = idx % cols;
+            const row = Math.floor(idx / cols);
+            const cx = left + (col + 0.5) * cellW;
+            const cy = top + row * cellH + labelBand + (cellH - labelBand) / 2;
+            spine.x = cx - (b.x + b.width / 2);
+            spine.y = cy - (b.y + b.height / 2);
+
+            const label = new Text(project.name, this.labelStyle);
+            label.anchor.set(0.5, 0);
+            label.x = cx;
+            label.y = top + row * cellH + labelBand * 0.2;
+            label.zIndex = 9000;
+            label.scale.set(1 / zoom);
+            this.viewport.wrapper.addChild(label);
+            this.labels.push(label);
+        });
+
+        // Dashed cell borders between columns and rows.
+        if (count > 1) {
+            const divider = new Graphics();
+            divider.zIndex = 9000;
+            divider.lineStyle({ width: 2 / zoom, color: 0x808080, alpha: 0.5 });
+            const dash = (x1: number, y1: number, x2: number, y2: number) => {
+                const len = Math.hypot(x2 - x1, y2 - y1);
+                const step = 30 / zoom;
+                for (let t = 0; t < len; t += step) {
+                    const t2 = Math.min(len, t + step * 0.6);
+                    divider.moveTo(x1 + (x2 - x1) * t / len, y1 + (y2 - y1) * t / len);
+                    divider.lineTo(x1 + (x2 - x1) * t2 / len, y1 + (y2 - y1) * t2 / len);
+                }
+            };
+            for (let c = 1; c < cols; c++) dash(left + c * cellW, top, left + c * cellW, top + gridH);
+            for (let r = 1; r < rows; r++) dash(left, top + r * cellH, left + gridW, top + r * cellH);
+            this.viewport.wrapper.addChild(divider);
+            this.dividers.push(divider);
+        }
+
+        if (fit) {
+            this.viewport.fitRect({ x: left, y: top, width: gridW, height: gridH }, 0.02);
+            this.labels.forEach(l => l.scale.set(1 / (this.viewport.wrapper.scale.x || 1)));
+        }
+    }
+
+    /** Re-layout and frame the compare grid (F key / fit button in compare mode). */
+    fitGrid(): void {
+        if (this.projects.length > 0) this.arrangeProjects(true);
     }
 
     private clearOverlays(): void {

@@ -21,6 +21,11 @@ export class ComparisonControlPanel {
         this.build();
 
         eventBus.on('comparison:projects-changed', () => this.refresh());
+        // Scrub / frame-step on the shared timeline pauses every project.
+        eventBus.on('compare:paused-changed', (paused: boolean) => {
+            this.isPaused = paused;
+            this.pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+        });
     }
 
     private build(): void {
@@ -193,12 +198,17 @@ export class ComparisonControlPanel {
             });
         }
 
-        // Mark currently-playing animation as active
-        const currentAnim = projects.map(p => p.manager.getCurrentTrackInfo(0)?.name).find(Boolean);
-        if (currentAnim) {
-            this.animListEl.querySelectorAll('.sv-compare-anim-row').forEach(r => {
-                const nameSpan = r.querySelector('.sv-compare-anim-name');
-                if (nameSpan?.textContent === currentAnim) r.classList.add('active');
+        // In some but not all projects (only possible with 3+): still playable.
+        const partial = [...unique.entries()].filter(([, owners]) => owners.length > 1);
+        if (partial.length > 0) {
+            const groupLabel = document.createElement('div');
+            groupLabel.className = 'sv-compare-group-label';
+            groupLabel.innerHTML = `<span class="sv-diff-dot sv-diff-shared" style="opacity:0.5"></span> In some projects (${partial.length})`;
+            this.animListEl.appendChild(groupLabel);
+            partial.forEach(([name, owners]) => {
+                const row = this.createAnimRow(name, projects, 'partial');
+                row.title = `In: ${owners.map(i => projects[i].name).join(', ')}`;
+                this.animListEl.appendChild(row);
             });
         }
 
@@ -221,6 +231,15 @@ export class ComparisonControlPanel {
                     const row = this.createAnimRow(name, projects, pIdx === 0 ? 'only-a' : 'only-b');
                     this.animListEl.appendChild(row);
                 });
+            });
+        }
+
+        // Mark currently-playing animation as active
+        const currentAnim = projects.map(p => p.manager.getCurrentTrackInfo(0)?.name).find(Boolean);
+        if (currentAnim) {
+            this.animListEl.querySelectorAll('.sv-compare-anim-row').forEach(r => {
+                const nameSpan = r.querySelector('.sv-compare-anim-name');
+                if (nameSpan?.textContent === currentAnim) r.classList.add('active');
             });
         }
     }

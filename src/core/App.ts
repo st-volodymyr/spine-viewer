@@ -138,6 +138,7 @@ export class App {
                 if (this.spineManager.spine) {
                     this.spineManager.spine.visible = true;
                     this.spineManager.spine.x = 0;  // reset position set by compare layout
+                    this.spineManager.spine.y = 0;
                     if (hasNonBorrowed) {
                         // Restore pause state that was active before compare
                         this.spineManager.setPaused(this.wasPausedBeforeCompare);
@@ -470,6 +471,10 @@ export class App {
 
     /** Frame the skeleton (single) or every compare project (comparison). */
     private fitToView(): void {
+        if (this.stateManager.mode === 'comparison' && this.comparisonPanel.getProjects().length > 0) {
+            this.comparisonPanel.fitGrid();
+            return;
+        }
         const managers = this.stateManager.mode === 'comparison'
             ? this.comparisonPanel.getProjects().map(p => p.manager)
             : [this.spineManager];
