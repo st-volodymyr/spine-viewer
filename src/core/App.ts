@@ -284,7 +284,7 @@ export class App {
         const profilerPanel = new ProfilerPanel(this.stateManager, this.spineManager);
         this.layout.addTab('profiler', 'Profiler', profilerPanel.element);
 
-        const eventPanel = new EventDebugPanel();
+        const eventPanel = new EventDebugPanel(this.spineManager, this.stateManager);
         this.layout.addTab('events', 'Events', eventPanel.element);
 
         this.comparisonPanel = new ComparisonPanel(this.viewport);

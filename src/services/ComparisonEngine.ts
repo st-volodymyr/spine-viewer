@@ -46,6 +46,275 @@ function collectAttachments(data: any): Map<string, AttachmentInfo> {
     return map;
 }
 
+
+// ---------------------------------------------------------------------------
+// Deep diff: animation durations, event timing, constraints, slot setup.
+// All readers duck-type the runtime SkeletonData (4.1 pixi-spine and 4.2
+// spine-core share field names) — no instanceof.
+// ---------------------------------------------------------------------------
+
+/** One frame at 30 fps, in seconds — duration deltas above this are flagged. */
+export const FRAME_30 = 1 / 30;
+const TIME_EPS = 0.001;   // 1 ms — event time tolerance
+const NUM_EPS = 1e-4;     // generic numeric tolerance for setup params
+
+export interface DurationDelta {
+    name: string;
+    a: number;        // seconds
+    b: number;        // seconds
+    delta: number;    // b - a, seconds
+    flagged: boolean; // |delta| > 1 frame @30fps
+}
+
+export interface DurationDiff {
+    shared: number;
+    changed: DurationDelta[]; // only animations whose duration differs at all (> ~0.5 ms)
+    flagged: number;
+}
+
+export interface EventKey {
+    name: string;
+    index: number;   // occurrence index of this name within the animation (time-sorted)
+    time: number;
+    int: number;
+    float: number;
+    string: string;
+}
+
+export interface EventKeyChange {
+    kind: 'only-a' | 'only-b' | 'changed';
+    name: string;
+    index: number;
+    a?: EventKey;
+    b?: EventKey;
+    changes: string[]; // human-readable ("time 0.500s → 0.533s (+33ms)", "int 1 → 2")
+}
+
+export interface AnimEventDiff { anim: string; keysA: number; keysB: number; changes: EventKeyChange[] }
+
+export interface EventTimingDiff {
+    animsCompared: number;
+    keysCompared: number;   // keys matched by name+index on both sides
+    anims: AnimEventDiff[]; // only animations with at least one change
+    issues: number;
+}
+
+export type ConstraintKind = 'ik' | 'transform' | 'path' | 'physics';
+export interface ConstraintRef { kind: ConstraintKind; name: string }
+export interface ConstraintChange extends ConstraintRef { changes: string[] }
+export interface ConstraintDiff {
+    onlyA: ConstraintRef[];
+    onlyB: ConstraintRef[];
+    changed: ConstraintChange[];
+    matched: number;
+}
+
+export interface SlotSetupChange { slot: string; changes: string[] }
+export interface SlotSetupDiff { shared: number; changed: SlotSetupChange[] }
+
+const CONSTRAINT_LISTS: [ConstraintKind, string][] = [
+    ['ik', 'ikConstraints'],
+    ['transform', 'transformConstraints'],
+    ['path', 'pathConstraints'],
+    ['physics', 'physicsConstraints'],
+];
+/** Fields that are identity/bookkeeping, not setup parameters. */
+const CONSTRAINT_SKIP = new Set(['name', 'order', 'index']);
+
+const fmtS = (s: number) => `${s.toFixed(3)}s`;
+const fmtMs = (s: number) => `${s >= 0 ? '+' : ''}${Math.round(s * 1000)}ms`;
+const fmtNum = (n: number) => (Number.isInteger(n) ? String(n) : String(+n.toFixed(4)));
+const numDiff = (a: number, b: number) => Math.abs(a - b) > NUM_EPS;
+
+function byName(list: any[] | undefined): Map<string, any> {
+    const m = new Map<string, any>();
+    for (const item of list ?? []) if (item?.name != null && !m.has(item.name)) m.set(item.name, item);
+    return m;
+}
+
+/** Normalize a constraint field to a comparable primitive (bones/targets → names). */
+function normField(v: any): string | number | boolean | undefined {
+    if (v == null) return undefined;
+    const t = typeof v;
+    if (t === 'number' || t === 'boolean' || t === 'string') return v;
+    if (Array.isArray(v)) {
+        if (v.every(x => x && typeof x === 'object' && 'name' in x)) return v.map(x => x.name).join(', ');
+        return undefined;
+    }
+    if (t === 'object' && typeof v.name === 'string') return v.name;
+    return undefined;
+}
+
+function constraintChanges(a: any, b: any): string[] {
+    const out: string[] = [];
+    // 4.2 stores target/bone behind getters (`_target`, `_bone`) — strip the
+    // underscore so we read the public accessor (and dedupe with it).
+    const keys = new Set<string>([...Object.keys(a), ...Object.keys(b)].map(k => k.replace(/^_/, '')));
+    const show = (v: any) => (v === undefined ? '—' : typeof v === 'number' ? fmtNum(v) : String(v));
+    for (const k of [...keys].sort()) {
+        if (CONSTRAINT_SKIP.has(k)) continue;
+        const va = normField(a[k]);
+        const vb = normField(b[k]);
+        if (va === undefined && vb === undefined) continue;
+        if (typeof va === 'number' && typeof vb === 'number') {
+            if (numDiff(va, vb)) out.push(`${k}: ${fmtNum(va)} → ${fmtNum(vb)}`);
+        } else if (va !== vb) {
+            out.push(`${k}: ${show(va)} → ${show(vb)}`);
+        }
+    }
+    return out;
+}
+
+/** Collect an animation's event keys, time-sorted, each tagged with its per-name occurrence index. */
+function collectEventKeys(anim: any): EventKey[] {
+    const raw: any[] = [];
+    for (const tl of anim?.timelines ?? []) {
+        if (tl && Array.isArray(tl.events)) raw.push(...tl.events.filter(Boolean));
+    }
+    raw.sort((x, y) => (x.time ?? 0) - (y.time ?? 0));
+    const counts = new Map<string, number>();
+    return raw.map(ev => {
+        const name: string = ev.data?.name ?? ev.name ?? '?';
+        const index = counts.get(name) ?? 0;
+        counts.set(name, index + 1);
+        return {
+            name, index,
+            time: ev.time ?? 0,
+            int: ev.intValue ?? 0,
+            float: ev.floatValue ?? 0,
+            string: ev.stringValue ?? '',
+        };
+    });
+}
+
+function colorHex(c: any): string | null {
+    if (!c) return null;
+    const h = (v: number) => Math.round(Math.max(0, Math.min(1, v ?? 0)) * 255).toString(16).padStart(2, '0');
+    return `${h(c.r)}${h(c.g)}${h(c.b)}${h(c.a ?? 1)}`;
+}
+
+const BLEND_NAMES = ['normal', 'additive', 'multiply', 'screen'];
+const blendName = (v: any) => (typeof v === 'number' ? BLEND_NAMES[v] ?? String(v) : String(v ?? 'normal'));
+
+/** Pure: duration deltas for animations present in both skeletons. */
+export function diffDurations(dataA: any, dataB: any): DurationDiff {
+    const a = byName(dataA?.animations);
+    const b = byName(dataB?.animations);
+    const changed: DurationDelta[] = [];
+    let shared = 0;
+    for (const [name, animA] of a) {
+        const animB = b.get(name);
+        if (!animB) continue;
+        shared++;
+        const da = animA.duration ?? 0;
+        const db = animB.duration ?? 0;
+        const delta = db - da;
+        if (Math.abs(delta) > 0.0005) {
+            changed.push({ name, a: da, b: db, delta, flagged: Math.abs(delta) > FRAME_30 + 1e-6 });
+        }
+    }
+    changed.sort((x, y) => Number(y.flagged) - Number(x.flagged) || Math.abs(y.delta) - Math.abs(x.delta) || x.name.localeCompare(y.name));
+    return { shared, changed, flagged: changed.filter(c => c.flagged).length };
+}
+
+/** Pure: event key timing/value diff for animations present in both skeletons. */
+export function diffEventTiming(dataA: any, dataB: any): EventTimingDiff {
+    const a = byName(dataA?.animations);
+    const b = byName(dataB?.animations);
+    const anims: AnimEventDiff[] = [];
+    let animsCompared = 0, keysCompared = 0, issues = 0;
+    const id = (k: EventKey) => `${k.name}#${k.index}`;
+
+    for (const [name, animA] of a) {
+        const animB = b.get(name);
+        if (!animB) continue;
+        const keysA = collectEventKeys(animA);
+        const keysB = collectEventKeys(animB);
+        if (!keysA.length && !keysB.length) continue;
+        animsCompared++;
+
+        const mapB = new Map(keysB.map(k => [id(k), k]));
+        const seen = new Set<string>();
+        const changes: EventKeyChange[] = [];
+
+        for (const ka of keysA) {
+            const kb = mapB.get(id(ka));
+            if (!kb) { changes.push({ kind: 'only-a', name: ka.name, index: ka.index, a: ka, changes: [] }); continue; }
+            seen.add(id(ka));
+            keysCompared++;
+            const diffs: string[] = [];
+            if (Math.abs(ka.time - kb.time) > TIME_EPS) diffs.push(`time ${fmtS(ka.time)} → ${fmtS(kb.time)} (${fmtMs(kb.time - ka.time)})`);
+            if (ka.int !== kb.int) diffs.push(`int ${ka.int} → ${kb.int}`);
+            if (numDiff(ka.float, kb.float)) diffs.push(`float ${fmtNum(ka.float)} → ${fmtNum(kb.float)}`);
+            if (ka.string !== kb.string) diffs.push(`string "${ka.string}" → "${kb.string}"`);
+            if (diffs.length) changes.push({ kind: 'changed', name: ka.name, index: ka.index, a: ka, b: kb, changes: diffs });
+        }
+        for (const kb of keysB) {
+            if (!seen.has(id(kb))) changes.push({ kind: 'only-b', name: kb.name, index: kb.index, b: kb, changes: [] });
+        }
+
+        if (changes.length) {
+            const t = (c: EventKeyChange) => (c.a ?? c.b)!.time;
+            changes.sort((x, y) => t(x) - t(y) || x.name.localeCompare(y.name));
+            anims.push({ anim: name, keysA: keysA.length, keysB: keysB.length, changes });
+            issues += changes.length;
+        }
+    }
+    anims.sort((x, y) => x.anim.localeCompare(y.anim));
+    return { animsCompared, keysCompared, anims, issues };
+}
+
+/** Pure: IK / transform / path / physics constraint diff. */
+export function diffConstraints(dataA: any, dataB: any): ConstraintDiff {
+    const onlyA: ConstraintRef[] = [];
+    const onlyB: ConstraintRef[] = [];
+    const changed: ConstraintChange[] = [];
+    let matched = 0;
+    for (const [kind, field] of CONSTRAINT_LISTS) {
+        const a = byName(dataA?.[field]);
+        const b = byName(dataB?.[field]);
+        for (const [name, ca] of a) {
+            const cb = b.get(name);
+            if (!cb) { onlyA.push({ kind, name }); continue; }
+            const changes = constraintChanges(ca, cb);
+            if (changes.length) changed.push({ kind, name, changes });
+            else matched++;
+        }
+        for (const name of b.keys()) if (!a.has(name)) onlyB.push({ kind, name });
+    }
+    const cmp = (x: ConstraintRef, y: ConstraintRef) => x.kind.localeCompare(y.kind) || x.name.localeCompare(y.name);
+    onlyA.sort(cmp); onlyB.sort(cmp); changed.sort(cmp);
+    return { onlyA, onlyB, changed, matched };
+}
+
+/** Pure: setup-pose slot changes (attachment, color, dark color, blend mode, parent bone). */
+export function diffSlotSetup(dataA: any, dataB: any): SlotSetupDiff {
+    const a = byName(dataA?.slots);
+    const b = byName(dataB?.slots);
+    const changed: SlotSetupChange[] = [];
+    let shared = 0;
+    for (const [name, sa] of a) {
+        const sb = b.get(name);
+        if (!sb) continue;
+        shared++;
+        const changes: string[] = [];
+        const attA = sa.attachmentName ?? null;
+        const attB = sb.attachmentName ?? null;
+        if (attA !== attB) changes.push(`attachment: ${attA ?? '(none)'} → ${attB ?? '(none)'}`);
+        const colA = colorHex(sa.color), colB = colorHex(sb.color);
+        if (colA !== colB) changes.push(`color: #${colA ?? '—'} → #${colB ?? '—'}`);
+        const darkA = colorHex(sa.darkColor), darkB = colorHex(sb.darkColor);
+        if (darkA !== darkB) changes.push(`dark: ${darkA ? '#' + darkA : 'off'} → ${darkB ? '#' + darkB : 'off'}`);
+        const blA = blendName(sa.blendMode), blB = blendName(sb.blendMode);
+        if (blA !== blB) changes.push(`blend: ${blA} → ${blB}`);
+        const boneA = sa.boneData?.name, boneB = sb.boneData?.name;
+        if (boneA !== boneB) changes.push(`bone: ${boneA ?? '—'} → ${boneB ?? '—'}`);
+        if (changes.length) changed.push({ slot: name, changes });
+    }
+    changed.sort((x, y) => x.slot.localeCompare(y.slot));
+    return { shared, changed };
+}
+
 export class ComparisonEngine {
     private managers: SpineManager[] = [];
     syncEnabled = true;
@@ -220,6 +489,32 @@ export class ComparisonEngine {
         onlyA.sort(); onlyB.sort();
         mismatches.sort((x, y) => x.key.localeCompare(y.key));
         return { onlyA, onlyB, mismatches, matched };
+    }
+
+    private dataPair(idxA: number, idxB: number): [any, any] | null {
+        const a = this.managers[idxA]?.spineData;
+        const b = this.managers[idxB]?.spineData;
+        return a && b ? [a, b] : null;
+    }
+
+    getDurationDiff(idxA: number, idxB: number): DurationDiff {
+        const p = this.dataPair(idxA, idxB);
+        return p ? diffDurations(p[0], p[1]) : { shared: 0, changed: [], flagged: 0 };
+    }
+
+    getEventTimingDiff(idxA: number, idxB: number): EventTimingDiff {
+        const p = this.dataPair(idxA, idxB);
+        return p ? diffEventTiming(p[0], p[1]) : { animsCompared: 0, keysCompared: 0, anims: [], issues: 0 };
+    }
+
+    getConstraintDiff(idxA: number, idxB: number): ConstraintDiff {
+        const p = this.dataPair(idxA, idxB);
+        return p ? diffConstraints(p[0], p[1]) : { onlyA: [], onlyB: [], changed: [], matched: 0 };
+    }
+
+    getSlotSetupDiff(idxA: number, idxB: number): SlotSetupDiff {
+        const p = this.dataPair(idxA, idxB);
+        return p ? diffSlotSetup(p[0], p[1]) : { shared: 0, changed: [] };
     }
 
     getFullDiffSummary(): string {

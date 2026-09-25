@@ -1,0 +1,124 @@
+/* Deep compare diff sections (Compare tab): durations, event timing, constraints, slot setup. */
+
+.sv-cdiff-badge {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+.sv-cdiff-badge--ok   { background: color-mix(in srgb, var(--sv-success) 15%, transparent); color: var(--sv-success); }
+.sv-cdiff-badge--warn { background: color-mix(in srgb, var(--sv-warning) 18%, transparent); color: var(--sv-warning); }
+.sv-cdiff-badge--err  { background: color-mix(in srgb, var(--sv-error) 15%, transparent); color: var(--sv-error); }
+
+.sv-cdiff-summary {
+    font-size: var(--sv-font-size-sm);
+    color: var(--sv-text-muted);
+    margin-bottom: 6px;
+    line-height: 1.35;
+}
+
+.sv-cdiff-empty {
+    font-size: var(--sv-font-size-sm);
+    color: var(--sv-text-muted);
+    font-style: italic;
+}
+
+.sv-cdiff-muted {
+    color: var(--sv-text-muted);
+    font-weight: 400;
+}
+
+/* Rows */
+.sv-cdiff-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: var(--sv-font-size-sm);
+}
+.sv-cdiff-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-top: 4px;
+}
+.sv-cdiff-dot--err  { background: var(--sv-error); }
+.sv-cdiff-dot--warn { background: var(--sv-warning); }
+.sv-cdiff-dot--info { background: var(--sv-text-muted); }
+
+.sv-cdiff-text {
+    flex: 1;
+    min-width: 0;
+}
+.sv-cdiff-main {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sv-cdiff-detail {
+    font-size: 10px;
+    font-family: var(--sv-font-mono);
+    color: var(--sv-text-muted);
+    overflow-wrap: anywhere;
+}
+
+/* Per-animation groups (event timing) */
+.sv-cdiff-group {
+    margin-bottom: 6px;
+    padding-left: 6px;
+    border-left: 2px solid var(--sv-border-light);
+}
+.sv-cdiff-group-title {
+    font-size: var(--sv-font-size-sm);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 1px;
+}
+
+/* Duration table */
+.sv-cdiff-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: var(--sv-font-size-sm);
+}
+.sv-cdiff-table th {
+    text-align: right;
+    font-weight: 600;
+    color: var(--sv-text-muted);
+    padding: 2px 4px;
+    border-bottom: 1px solid var(--sv-border-light);
+    width: 52px;
+}
+.sv-cdiff-table th:first-child {
+    text-align: left;
+    width: auto;
+}
+.sv-cdiff-table td {
+    padding: 2px 4px;
+    border-bottom: 1px solid var(--sv-border-light);
+}
+.sv-cdiff-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sv-cdiff-num {
+    text-align: right;
+    font-family: var(--sv-font-mono);
+    color: var(--sv-text-secondary);
+}
+.sv-cdiff-table tr.sv-cdiff-flagged td {
+    background: color-mix(in srgb, var(--sv-warning) 10%, transparent);
+}
+.sv-cdiff-table tr.sv-cdiff-flagged td:last-child {
+    color: var(--sv-warning);
+    font-weight: 600;
+}

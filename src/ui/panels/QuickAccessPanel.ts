@@ -3,6 +3,7 @@ import type { StateManager } from '../../core/StateManager';
 import type { SpineManager, DebugDrawOptions } from '../../core/SpineManager';
 import type { SpineEventData } from '../../core/SpineManager';
 import type { AnimationCost, Severity } from '../../services/AnimationProfiler';
+import { QueuePlayer, type QueueRepeat } from '../../services/QueuePlayer';
 
 const SEVERITY_COLOR: Record<Severity, string> = {
     ok: '#4a9a5a',
@@ -47,6 +48,7 @@ export class QuickAccessPanel {
         regions: false,
         clipping: false,
         paths: false,
+        origin: false,
     };
 
     // Playback
@@ -61,6 +63,15 @@ export class QuickAccessPanel {
     // Queue
     private queueListEl!: HTMLElement;
     private queue: string[] = [];
+    private queueAddSelect!: HTMLSelectElement;
+    private queuePlayBtn!: HTMLButtonElement;
+    private queueMetaEl!: HTMLElement;
+    private queueRepeat: QueueRepeat = 'once';
+    private queuePlayer: QueuePlayer;
+    /** Snapshot of the list the running queue was started with (edits apply on next Play). */
+    private queueRunning: string[] = [];
+    private queueRunTrack = 0;
+    private queueDragFrom = -1;
 
     // Event triggers
     private triggers: EventTrigger[] = [];
@@ -76,6 +87,7 @@ export class QuickAccessPanel {
         private spineManager: SpineManager,
     ) {
         this.element = document.createElement('div');
+        this.queuePlayer = new QueuePlayer(spineManager, () => this.onQueueProgress());
         this.build();
 
         eventBus.on('project:change', () => {
@@ -84,6 +96,8 @@ export class QuickAccessPanel {
             this.currentTrack = 0;
             this.isPaused = false;
             this.queue = [];
+            this.queuePlayer.reset();
+            this.renderQueue();
             this.triggers = [];
             this.refresh();
             // Re-apply persisted debug-draw + mix settings to the freshly created spine.
@@ -356,40 +370,84 @@ export class QuickAccessPanel {
 
         // ── ANIMATION QUEUE ───────────────────────────────────────────
         const queueSection = this.makeSection('ANIMATION QUEUE', (body) => {
-            const btnRow = document.createElement('div');
-            btnRow.className = 'sv-control-row';
-            btnRow.style.flexWrap = 'wrap';
-            btnRow.style.gap = '4px';
-
+            // Add row: pick any animation (no need to play it first).
+            const addRow = document.createElement('div');
+            addRow.className = 'sv-queue-add';
+            this.queueAddSelect = document.createElement('select');
+            this.queueAddSelect.className = 'sv-select';
+            this.queueAddSelect.title = 'Animation to append';
+            addRow.appendChild(this.queueAddSelect);
             const addBtn = document.createElement('button');
             addBtn.className = 'sv-btn sv-btn-sm';
             addBtn.textContent = '+ Add';
-            addBtn.title = 'Add current animation to queue';
+            addBtn.title = 'Append to the end of the queue';
             addBtn.addEventListener('click', () => {
-                if (this.currentAnim) {
-                    this.queue.push(this.currentAnim);
-                    this.renderQueue();
-                }
+                const name = this.queueAddSelect.value;
+                if (!name) return;
+                this.queue.push(name);
+                this.renderQueue();
             });
-            btnRow.appendChild(addBtn);
+            addRow.appendChild(addBtn);
+            body.appendChild(addRow);
 
-            const playBtn = document.createElement('button');
-            playBtn.className = 'sv-btn sv-btn-sm sv-btn-primary';
-            playBtn.textContent = '\u25B6 Play Queue';
-            playBtn.addEventListener('click', () => this.playQueue());
-            btnRow.appendChild(playBtn);
+            this.queueListEl = document.createElement('div');
+            this.queueListEl.className = 'sv-queue-list';
+            body.appendChild(this.queueListEl);
+
+            // Repeat mode
+            const repeatRow = document.createElement('div');
+            repeatRow.className = 'sv-queue-repeat';
+            const repeatLbl = document.createElement('span');
+            repeatLbl.textContent = 'Repeat';
+            repeatRow.appendChild(repeatLbl);
+            const seg = document.createElement('div');
+            seg.className = 'sv-segmented';
+            const modes: { key: QueueRepeat; label: string; title: string }[] = [
+                { key: 'once', label: 'Once', title: 'Play the list once and hold the last frame' },
+                { key: 'last', label: 'Loop last', title: 'Play the list, then loop the last animation (typical intro \u2192 idle)' },
+                { key: 'all', label: 'Loop all', title: 'Repeat the whole list A \u2192 B \u2192 C \u2192 A \u2026' },
+            ];
+            const segBtns: HTMLButtonElement[] = [];
+            modes.forEach(m => {
+                const b = document.createElement('button');
+                b.textContent = m.label;
+                b.title = m.title;
+                b.classList.toggle('active', m.key === this.queueRepeat);
+                b.addEventListener('click', () => {
+                    this.queueRepeat = m.key;
+                    segBtns.forEach((x, i) => x.classList.toggle('active', modes[i].key === m.key));
+                    this.renderQueue();
+                });
+                segBtns.push(b);
+                seg.appendChild(b);
+            });
+            repeatRow.appendChild(seg);
+            body.appendChild(repeatRow);
+
+            // Play / Clear + meta
+            const btnRow = document.createElement('div');
+            btnRow.className = 'sv-queue-actions';
+            this.queuePlayBtn = document.createElement('button');
+            this.queuePlayBtn.className = 'sv-btn sv-btn-sm sv-btn-primary';
+            this.queuePlayBtn.addEventListener('click', () => {
+                if (this.queuePlayer.state.running) this.queuePlayer.stop(this.queueRunTrack);
+                else this.playQueue();
+            });
+            btnRow.appendChild(this.queuePlayBtn);
 
             const clearBtn = document.createElement('button');
             clearBtn.className = 'sv-btn sv-btn-sm';
             clearBtn.textContent = 'Clear';
+            clearBtn.title = 'Empty the queue';
             clearBtn.addEventListener('click', () => { this.queue = []; this.renderQueue(); });
             btnRow.appendChild(clearBtn);
 
+            this.queueMetaEl = document.createElement('span');
+            this.queueMetaEl.className = 'sv-queue-meta';
+            btnRow.appendChild(this.queueMetaEl);
             body.appendChild(btnRow);
 
-            this.queueListEl = document.createElement('div');
-            this.queueListEl.style.marginTop = '4px';
-            body.appendChild(this.queueListEl);
+            this.renderQueue();
         });
         this.element.appendChild(queueSection);
 
@@ -581,7 +639,7 @@ export class QuickAccessPanel {
         const debugSection = this.makeSection('DEBUG DRAW', (body) => {
             const hint = document.createElement('div');
             hint.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 0 6px';
-            hint.textContent = 'Overlay skeleton internals (Spine 4.2).';
+            hint.textContent = 'Overlay skeleton internals. Origin = the point the game positions the spine by.';
             body.appendChild(hint);
 
             const grid = document.createElement('div');
@@ -594,6 +652,7 @@ export class QuickAccessPanel {
                 { key: 'regions', label: 'Regions' },
                 { key: 'clipping', label: 'Clipping' },
                 { key: 'paths', label: 'Paths' },
+                { key: 'origin', label: 'Origin' },
             ];
 
             options.forEach(({ key, label }) => {
@@ -744,25 +803,134 @@ export class QuickAccessPanel {
 
     private playQueue(): void {
         if (this.queue.length === 0) return;
-        this.spineManager.setAnimationsList(this.currentTrack, [...this.queue], this.loopToggle.checked);
+        if (this.isPaused) this.togglePause();
+        this.queueRunning = [...this.queue];
+        this.queueRunTrack = this.currentTrack;
+        this.queuePlayer.play(this.queueRunTrack, this.queueRunning, this.queueRepeat);
+        this.updateTrackPills();
+    }
+
+    private onQueueProgress(): void {
+        this.renderQueue();
+        const p = this.queuePlayer.state;
+        const name = p.running ? this.queueRunning[p.index] : '';
+        if (name) {
+            this.currentAnim = name;
+            this.updateAnimTagOnly();
+        }
+    }
+
+    /** Keep the active-animation chip in step with the queue without a full refresh. */
+    private updateAnimTagOnly(): void {
+        const nameEl = this.animTag.querySelector('span > span:not(:last-child)');
+        if (nameEl) nameEl.textContent = this.currentAnim;
     }
 
     private renderQueue(): void {
+        if (!this.queueListEl) return;
         this.queueListEl.innerHTML = '';
+        const p = this.queuePlayer.state;
+        const sameList = this.queue.length === this.queueRunning.length
+            && this.queue.every((n, i) => n === this.queueRunning[i]);
+        const showProgress = sameList && (p.running || p.index >= this.queue.length);
+
+        if (this.queue.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'sv-queue-empty';
+            empty.textContent = 'Empty \u2014 pick an animation above and press + Add.';
+            this.queueListEl.appendChild(empty);
+        }
+
         this.queue.forEach((name, idx) => {
             const item = document.createElement('div');
-            item.style.cssText = 'display:flex;align-items:center;gap:4px;padding:2px 0;font-size:var(--sv-font-size-sm)';
+            item.className = 'sv-queue-item';
+            if (showProgress && idx < p.index) item.classList.add('played');
+            if (showProgress && p.running && idx === p.index) item.classList.add('current');
+            item.draggable = true;
+            item.title = 'Drag to reorder';
+
+            const grip = document.createElement('span');
+            grip.className = 'sv-queue-grip';
+            grip.textContent = '\u2807';
+            item.appendChild(grip);
+
+            const num = document.createElement('span');
+            num.className = 'sv-queue-num';
+            num.textContent = showProgress && p.running && idx === p.index ? '\u25B6' : `${idx + 1}`;
+            item.appendChild(num);
+
             const lbl = document.createElement('span');
-            lbl.style.flex = '1';
-            lbl.textContent = `${idx + 1}. ${name}`;
+            lbl.className = 'sv-queue-name';
+            lbl.textContent = name;
             item.appendChild(lbl);
+
+            const isLast = idx === this.queue.length - 1;
+            if (isLast && this.queueRepeat === 'last') {
+                const loopMark = document.createElement('span');
+                loopMark.className = 'sv-queue-loop';
+                loopMark.textContent = '\u221E';
+                loopMark.title = 'Loops (Repeat: Loop last)';
+                item.appendChild(loopMark);
+            }
+
+            const dur = this.spineManager.getAnimationDuration(name);
+            const durEl = document.createElement('span');
+            durEl.className = 'sv-queue-dur';
+            durEl.textContent = dur !== null ? `${dur.toFixed(2)}s` : '';
+            item.appendChild(durEl);
+
             const rm = document.createElement('button');
-            rm.className = 'sv-btn sv-btn-sm';
+            rm.className = 'sv-queue-rm';
             rm.textContent = '\u00D7';
+            rm.title = 'Remove';
             rm.addEventListener('click', () => { this.queue.splice(idx, 1); this.renderQueue(); });
             item.appendChild(rm);
+
+            // Native drag & drop reorder.
+            item.addEventListener('dragstart', (e) => {
+                this.queueDragFrom = idx;
+                e.dataTransfer?.setData('text/plain', String(idx));
+                item.classList.add('dragging');
+            });
+            item.addEventListener('dragend', () => item.classList.remove('dragging'));
+            item.addEventListener('dragover', (e) => {
+                if (this.queueDragFrom < 0) return;
+                e.preventDefault();
+                item.classList.add('drop-target');
+            });
+            item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+            item.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const from = this.queueDragFrom;
+                this.queueDragFrom = -1;
+                if (from < 0 || from === idx) { this.renderQueue(); return; }
+                const [moved] = this.queue.splice(from, 1);
+                this.queue.splice(idx, 0, moved);
+                this.renderQueue();
+            });
+
             this.queueListEl.appendChild(item);
         });
+
+        // Play/Stop button + meta line.
+        if (this.queuePlayBtn) {
+            this.queuePlayBtn.textContent = p.running ? '\u25A0 Stop' : '\u25B6 Play';
+            this.queuePlayBtn.title = p.running ? 'Stop the queue (clears its track)' : `Play the queue on track ${this.currentTrack}`;
+            this.queuePlayBtn.disabled = !p.running && this.queue.length === 0;
+        }
+        if (this.queueMetaEl) {
+            const total = this.queue.reduce((s, n) => s + (this.spineManager.getAnimationDuration(n) ?? 0), 0);
+            const parts: string[] = [];
+            if (this.queue.length) parts.push(`${this.queue.length} \u00B7 ${total.toFixed(2)}s`);
+            if (p.running) {
+                parts.push(`T${this.queueRunTrack}`);
+                if (this.queueRepeat === 'all') parts.push(`cycle ${p.cycle}`);
+                if (!sameList) parts.push('edited \u2014 applies on next Play');
+            } else if (this.queue.length) {
+                parts.push(`on T${this.currentTrack}`);
+            }
+            this.queueMetaEl.textContent = parts.join(' \u00B7 ');
+        }
     }
 
     private addTrigger(): void {
@@ -930,6 +1098,17 @@ export class QuickAccessPanel {
         });
 
         this.renderTriggers();
+
+        // Queue "add" picker defaults to the selected animation.
+        this.queueAddSelect.innerHTML = '';
+        project.animationNames.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            this.queueAddSelect.appendChild(opt);
+        });
+        this.queueAddSelect.value = this.currentAnim || project.animationNames[0] || '';
+        this.renderQueue();
 
         // Active tag chip
         if (this.currentAnim) {

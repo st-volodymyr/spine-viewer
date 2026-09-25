@@ -1,6 +1,7 @@
 import { eventBus } from '../../core/EventBus';
 import { SpineManager } from '../../core/SpineManager';
-import { ComparisonEngine } from '../../services/ComparisonEngine';
+import { ComparisonEngine, FRAME_30 } from '../../services/ComparisonEngine';
+import '../../styles/compare-diff.css';
 import { loadSpineFiles, createFileInput } from '../../services/FileLoader';
 import { parseSpineFiles } from '../../services/SpineParser';
 import { detectSpineVersion } from '../../services/SpineVersionDetector';
@@ -589,6 +590,204 @@ export class ComparisonPanel {
 
         // Attachment-level reskin audit.
         this.appendReskinSection(nameA, nameB);
+
+        // Deep diff of shared content.
+        this.appendDurationSection();
+        this.appendEventTimingSection(nameA, nameB);
+        this.appendConstraintSection(nameA, nameB);
+        this.appendSlotSetupSection();
+    }
+
+    // ----- Deep diff sections -------------------------------------------------
+
+    /**
+     * Builds a collapsible deep-diff section (header with count badge + one-line
+     * summary) and returns its body. Collapsed by default when there is nothing to show.
+     */
+    private createDeepSection(title: string, issues: number, severity: 'ok' | 'warn' | 'err', badgeText: string, summary: string): HTMLElement {
+        const section = document.createElement('div');
+        section.className = 'sv-diff-section sv-cdiff';
+
+        const header = document.createElement('div');
+        header.className = 'sv-section-header';
+        if (issues === 0) header.classList.add('collapsed');
+        const arrow = document.createElement('span');
+        arrow.className = 'sv-section-arrow';
+        arrow.textContent = '▼';
+        const label = document.createElement('span');
+        label.textContent = title;
+        const badge = document.createElement('span');
+        badge.className = `sv-cdiff-badge sv-cdiff-badge--${severity}`;
+        badge.textContent = badgeText;
+        header.append(arrow, label, badge);
+        header.addEventListener('click', () => header.classList.toggle('collapsed'));
+        section.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'sv-section-body';
+        const sum = document.createElement('div');
+        sum.className = 'sv-cdiff-summary';
+        sum.textContent = summary;
+        body.appendChild(sum);
+
+        section.appendChild(body);
+        this.diffContainer.appendChild(section);
+        return body;
+    }
+
+    private cdiffBadge(issues: number, hardIssues: number): { severity: 'ok' | 'warn' | 'err'; text: string } {
+        if (issues === 0) return { severity: 'ok', text: 'no differences' };
+        return { severity: hardIssues > 0 ? 'err' : 'warn', text: `${issues} diff${issues !== 1 ? 's' : ''}` };
+    }
+
+    private cdiffEmpty(body: HTMLElement, text: string): void {
+        const el = document.createElement('div');
+        el.className = 'sv-cdiff-empty';
+        el.textContent = text;
+        body.appendChild(el);
+    }
+
+    /** One diff row: severity dot, main text, optional detail lines. */
+    private cdiffRow(parent: HTMLElement, sev: 'err' | 'warn' | 'info', main: string, details: string[] = [], mainTitle?: string): void {
+        const r = document.createElement('div');
+        r.className = 'sv-cdiff-row';
+        const dot = document.createElement('span');
+        dot.className = `sv-cdiff-dot sv-cdiff-dot--${sev}`;
+        r.appendChild(dot);
+        const wrap = document.createElement('div');
+        wrap.className = 'sv-cdiff-text';
+        const m = document.createElement('div');
+        m.className = 'sv-cdiff-main';
+        m.textContent = main;
+        if (mainTitle) m.title = mainTitle;
+        wrap.appendChild(m);
+        details.forEach(d => {
+            const det = document.createElement('div');
+            det.className = 'sv-cdiff-detail';
+            det.textContent = d;
+            det.title = d;
+            wrap.appendChild(det);
+        });
+        r.appendChild(wrap);
+        parent.appendChild(r);
+    }
+
+    private appendDurationSection(): void {
+        const d = this.engine.getDurationDiff(0, 1);
+        const minor = d.changed.length - d.flagged;
+        const badgeText = d.flagged ? `${d.flagged} > 1 frame` : minor ? `${minor} sub-frame` : 'no differences';
+        const body = this.createDeepSection(
+            'Animation Durations', d.changed.length, d.flagged ? 'warn' : 'ok', badgeText,
+            `${d.shared} shared · ${d.flagged} differ by > 1 frame @30fps (${Math.round(FRAME_30 * 1000)}ms) · ${minor} sub-frame`,
+        );
+        if (d.changed.length === 0) {
+            this.cdiffEmpty(body, 'All shared animations have identical durations.');
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'sv-cdiff-table';
+        table.innerHTML = '<thead><tr><th>Animation</th><th>A ms</th><th>B ms</th><th>Δ</th></tr></thead>';
+        const tbody = document.createElement('tbody');
+        d.changed.forEach(c => {
+            const tr = document.createElement('tr');
+            if (c.flagged) tr.className = 'sv-cdiff-flagged';
+            const cells = [
+                c.name,
+                String(Math.round(c.a * 1000)),
+                String(Math.round(c.b * 1000)),
+                `${c.delta >= 0 ? '+' : ''}${Math.round(c.delta * 1000)}`,
+            ];
+            cells.forEach((v, i) => {
+                const td = document.createElement('td');
+                td.textContent = v;
+                if (i === 0) { td.className = 'sv-cdiff-name'; td.title = v; } else td.className = 'sv-cdiff-num';
+                tr.appendChild(td);
+            });
+            tr.title = `${(c.delta * 30).toFixed(2)} frames @30fps`;
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
+    }
+
+    private appendEventTimingSection(nameA: string, nameB: string): void {
+        const d = this.engine.getEventTimingDiff(0, 1);
+        const missing = d.anims.reduce((n, a) => n + a.changes.filter(c => c.kind !== 'changed').length, 0);
+        const { severity, text } = this.cdiffBadge(d.issues, missing);
+        const body = this.createDeepSection(
+            'Event Timing', d.issues, severity, text,
+            `${d.animsCompared} shared anim(s) with events · ${d.keysCompared} key(s) matched · ${missing} missing · ${d.issues - missing} changed`,
+        );
+        if (d.issues === 0) {
+            this.cdiffEmpty(body, d.animsCompared
+                ? 'Every event key matches by name, order, time and values.'
+                : 'No event keys in shared animations.');
+            return;
+        }
+
+        d.anims.forEach(a => {
+            const group = document.createElement('div');
+            group.className = 'sv-cdiff-group';
+            const head = document.createElement('div');
+            head.className = 'sv-cdiff-group-title';
+            head.textContent = `${a.anim}`;
+            head.title = a.anim;
+            const cnt = document.createElement('span');
+            cnt.className = 'sv-cdiff-muted';
+            cnt.textContent = ` ${a.keysA} | ${a.keysB} keys`;
+            head.appendChild(cnt);
+            group.appendChild(head);
+
+            a.changes.forEach(c => {
+                const label = `${c.name} #${c.index + 1}`;
+                if (c.kind === 'only-a') {
+                    this.cdiffRow(group, 'err', `${label} @ ${c.a!.time.toFixed(3)}s`, [`missing in ${nameB}`]);
+                } else if (c.kind === 'only-b') {
+                    this.cdiffRow(group, 'err', `${label} @ ${c.b!.time.toFixed(3)}s`, [`missing in ${nameA}`]);
+                } else {
+                    this.cdiffRow(group, 'warn', label, c.changes);
+                }
+            });
+            body.appendChild(group);
+        });
+    }
+
+    private appendConstraintSection(nameA: string, nameB: string): void {
+        const d = this.engine.getConstraintDiff(0, 1);
+        const missing = d.onlyA.length + d.onlyB.length;
+        const issues = missing + d.changed.length;
+        const { severity, text } = this.cdiffBadge(issues, missing);
+        const total = d.matched + d.changed.length;
+        const body = this.createDeepSection(
+            'Constraints', issues, severity, text,
+            `${total} shared (${d.matched} identical · ${d.changed.length} changed) · ${d.onlyA.length} only in ${nameA} · ${d.onlyB.length} only in ${nameB}`,
+        );
+        if (issues === 0) {
+            this.cdiffEmpty(body, total
+                ? 'IK / transform / path / physics constraints match (targets, bones, setup params).'
+                : 'Neither skeleton has constraints.');
+            return;
+        }
+        const kindLabel = (k: string) => (k === 'ik' ? 'IK' : k);
+        d.changed.forEach(c => this.cdiffRow(body, 'warn', `[${kindLabel(c.kind)}] ${c.name}`, c.changes));
+        d.onlyA.forEach(c => this.cdiffRow(body, 'err', `[${kindLabel(c.kind)}] ${c.name}`, [`missing in ${nameB}`]));
+        d.onlyB.forEach(c => this.cdiffRow(body, 'err', `[${kindLabel(c.kind)}] ${c.name}`, [`missing in ${nameA}`]));
+    }
+
+    private appendSlotSetupSection(): void {
+        const d = this.engine.getSlotSetupDiff(0, 1);
+        const issues = d.changed.length;
+        const { severity, text } = this.cdiffBadge(issues, 0);
+        const body = this.createDeepSection(
+            'Slot Setup', issues, severity, text,
+            `${d.shared} shared slot(s) · ${issues} with changed setup attachment / color / blend / bone`,
+        );
+        if (issues === 0) {
+            this.cdiffEmpty(body, 'Setup attachment, color, dark color, blend mode and parent bone match for every shared slot.');
+            return;
+        }
+        d.changed.forEach(c => this.cdiffRow(body, 'warn', c.slot, c.changes));
     }
 
     private appendReskinSection(nameA: string, nameB: string): void {

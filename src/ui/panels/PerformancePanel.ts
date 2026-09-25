@@ -3,10 +3,19 @@ import type { Viewport } from '../../core/Viewport';
 import type { SpineManager } from '../../core/SpineManager';
 import type { ComparisonPanel } from '../panels/ComparisonPanel';
 import { StressTest } from '../../services/StressTest';
+import { FrameLog, formatLogTime, type FrameContext, type FrameLogEntry } from '../../services/FrameLog';
+import '../../styles/perf-log.css';
 
 const WARN_BONES = 200;
 const WARN_SLOTS = 300;
 const WARN_FPS = 30;
+/** Selectable slow-frame thresholds (ms). */
+const LOG_THRESHOLDS: Array<{ ms: number; label: string }> = [
+    { ms: 20, label: '> 20 ms (50 fps)' },
+    { ms: 1000 / 30, label: '> 33 ms (30 fps)' },
+    { ms: 50, label: '> 50 ms (20 fps)' },
+];
+const LOG_OPEN_KEY = 'sv-perflog-open';
 
 export class PerformancePanel {
     private panel: HTMLElement;
@@ -32,15 +41,30 @@ export class PerformancePanel {
 
     private stressTest: StressTest;
 
+    // Slow-frame / long-task log
+    private frameLog: FrameLog;
+    private logSection!: HTMLElement;
+    private logBadge!: HTMLElement;
+    private logStats!: HTMLElement;
+    private logList!: HTMLElement;
+    private logEmpty!: HTMLElement;
+    private logPauseBtn!: HTMLButtonElement;
+    private logRowCount = 0;
+
     constructor(private viewport: Viewport, private spineManager: SpineManager, private comparisonPanel: ComparisonPanel | null = null) {
         this.stressTest = new StressTest(viewport, spineManager);
+        this.frameLog = new FrameLog(() => this.frameContext());
         this.panel = this.buildPanel();
         document.body.appendChild(this.panel);
         viewport.ticker.add(() => this.tick());
 
         eventBus.on('mode:change', (mode: string) => {
             this.isCompareMode = mode === 'comparison';
+            this.frameLog.suppress();
         });
+        // Loading/parsing a skeleton produces giant deltas — not worth logging.
+        eventBus.on('project:change', () => this.frameLog.suppress());
+        eventBus.on('comparison:projects-changed', () => this.frameLog.suppress());
     }
 
     private buildPanel(): HTMLElement {
@@ -156,7 +180,210 @@ export class PerformancePanel {
         // Keep the slider/label honest if a project reload clears the clones.
         eventBus.on('project:change', () => { stressSlider.value = '0'; stressCount.textContent = '0 copies'; });
 
+        panel.appendChild(this.buildLogSection());
+
         return panel;
+    }
+
+    // ── Slow frames log ─────────────────────────────────────────────────
+
+    private buildLogSection(): HTMLElement {
+        const sec = document.createElement('div');
+        sec.className = 'sv-perflog';
+        this.logSection = sec;
+
+        const header = document.createElement('div');
+        header.className = 'sv-perflog-header';
+        const caret = document.createElement('span');
+        caret.className = 'sv-perflog-caret';
+        caret.textContent = '▸';
+        const title = document.createElement('span');
+        title.textContent = 'SLOW FRAMES';
+        this.logBadge = document.createElement('span');
+        this.logBadge.className = 'sv-perflog-badge';
+        this.logBadge.textContent = '0';
+        header.append(caret, title, this.logBadge);
+        header.addEventListener('click', () => this.setLogOpen(!sec.classList.contains('sv-perflog--open')));
+        sec.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'sv-perflog-body';
+
+        const controls = document.createElement('div');
+        controls.className = 'sv-perflog-controls';
+        const thr = document.createElement('select');
+        thr.title = 'Log frames slower than';
+        LOG_THRESHOLDS.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = String(o.ms);
+            opt.textContent = o.label;
+            thr.appendChild(opt);
+        });
+        thr.value = String(this.frameLog.threshold);
+        thr.addEventListener('change', () => {
+            this.frameLog.threshold = parseFloat(thr.value);
+            this.recheckHotRows();
+        });
+
+        this.logPauseBtn = document.createElement('button');
+        this.logPauseBtn.className = 'sv-btn sv-btn-sm';
+        this.logPauseBtn.textContent = 'Pause';
+        this.logPauseBtn.title = 'Pause / resume logging';
+        this.logPauseBtn.addEventListener('click', () => {
+            this.frameLog.enabled = !this.frameLog.enabled;
+            if (this.frameLog.enabled) this.frameLog.suppress();
+            this.logPauseBtn.textContent = this.frameLog.enabled ? 'Pause' : 'Resume';
+            this.renderLogStats();
+        });
+
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'sv-btn sv-btn-sm';
+        clearBtn.textContent = 'Clear';
+        clearBtn.addEventListener('click', () => {
+            this.frameLog.clear();
+            this.renderFrameLog();
+        });
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'sv-btn sv-btn-sm';
+        copyBtn.textContent = 'Copy';
+        copyBtn.title = 'Copy log as tab-separated text (for bug reports)';
+        copyBtn.addEventListener('click', () => {
+            const text = this.frameLog.toText();
+            const n = this.frameLog.entries().length;
+            const done = (ok: boolean) => eventBus.emit('toast', {
+                message: ok ? `Frame log copied (${n} entries)` : 'Clipboard not available',
+                type: ok ? 'success' : 'error',
+            });
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+            } else {
+                done(false);
+            }
+        });
+
+        controls.append(thr, this.logPauseBtn, clearBtn, copyBtn);
+        body.appendChild(controls);
+
+        this.logStats = document.createElement('div');
+        this.logStats.className = 'sv-perflog-stats';
+        body.appendChild(this.logStats);
+
+        this.logList = document.createElement('div');
+        this.logList.className = 'sv-perflog-list';
+        this.logEmpty = document.createElement('div');
+        this.logEmpty.className = 'sv-perflog-empty';
+        this.logEmpty.textContent = 'No slow frames yet';
+        this.logList.appendChild(this.logEmpty);
+        body.appendChild(this.logList);
+
+        sec.appendChild(body);
+
+        let open = false;
+        try { open = localStorage.getItem(LOG_OPEN_KEY) === '1'; } catch {}
+        this.setLogOpen(open);
+        this.renderLogStats();
+        return sec;
+    }
+
+    private setLogOpen(open: boolean): void {
+        this.logSection.classList.toggle('sv-perflog--open', open);
+        try { localStorage.setItem(LOG_OPEN_KEY, open ? '1' : '0'); } catch {}
+    }
+
+    /** Only called for slow frames / long tasks — allocation is fine here. */
+    private frameContext(): FrameContext {
+        // Counter reflects the last completed render (the ticker runs before render).
+        const renderer = this.viewport.app.renderer as any;
+        const dc = renderer._drawCallCount ?? renderer.batch?._drawCallCount;
+        const drawCalls = typeof dc === 'number' ? dc : null;
+
+        if (this.isCompareMode && this.comparisonPanel) {
+            const projects = this.comparisonPanel.getProjects();
+            return {
+                drawCalls,
+                paused: projects.length > 0 && projects[0].manager.isPaused(),
+                context: projects.map(p => `${p.name}: ${this.describeTracks(p.manager)}`).join(' | ') || 'no projects',
+            };
+        }
+        return {
+            drawCalls,
+            paused: this.spineManager.isPaused(),
+            context: this.spineManager.spine ? this.describeTracks(this.spineManager) : 'no skeleton',
+        };
+    }
+
+    private describeTracks(manager: SpineManager): string {
+        const tracks = manager.getAllActiveTracks();
+        if (tracks.length === 0) return 'setup pose';
+        return tracks
+            .map(t => `T${t.trackIndex} ${t.name} @${t.time.toFixed(2)}/${t.duration.toFixed(2)}s${t.loop ? ' L' : ''}`)
+            .join(', ');
+    }
+
+    private renderLogStats(): void {
+        const log = this.frameLog;
+        const lt = log.longTaskSupported ? String(log.longTasks) : 'not supported in this browser';
+        const worst = log.worstFrameMs > 0 ? log.worstFrameMs.toFixed(1) + ' ms' : '—';
+        this.logStats.textContent = `slow ${log.slowFrames} · worst ${worst} · long tasks ${lt}${log.enabled ? '' : ' · PAUSED'}`;
+        const total = log.slowFrames + log.longTasks;
+        this.logBadge.textContent = String(total);
+        this.logBadge.classList.toggle('sv-perflog-badge--bad', total > 0);
+    }
+
+    /** Incremental: prepend new rows (newest on top), trim the tail. */
+    private renderFrameLog(): void {
+        const { cleared, entries } = this.frameLog.drainNew();
+        if (cleared) {
+            this.logList.replaceChildren(this.logEmpty);
+            this.logRowCount = 0;
+        }
+        if (entries.length > 0) {
+            if (this.logEmpty.parentNode) this.logEmpty.remove();
+            const frag = document.createDocumentFragment();
+            // entries are oldest-first; emit newest-first.
+            for (let i = entries.length - 1; i >= 0; i--) frag.appendChild(this.buildLogRow(entries[i]));
+            this.logList.insertBefore(frag, this.logList.firstChild);
+            this.logRowCount += entries.length;
+            while (this.logRowCount > this.frameLog.capacity && this.logList.lastChild) {
+                this.logList.lastChild.remove();
+                this.logRowCount--;
+            }
+        }
+        this.renderLogStats();
+    }
+
+    private buildLogRow(e: FrameLogEntry): HTMLElement {
+        const row = document.createElement('div');
+        row.className = 'sv-perflog-row' + (e.kind === 'longtask' ? ' sv-perflog-row--lt' : '');
+        row.dataset.ms = String(e.ms);
+        if (e.kind === 'frame' && e.ms > this.frameLog.threshold * 2) row.classList.add('sv-perflog-row--hot');
+
+        const t = document.createElement('span');
+        t.className = 'sv-perflog-t';
+        t.textContent = formatLogTime(e.t);
+        const ms = document.createElement('span');
+        ms.className = 'sv-perflog-ms';
+        ms.textContent = e.ms.toFixed(1);
+        const dc = document.createElement('span');
+        dc.textContent = e.drawCalls !== null ? String(e.drawCalls) : '';
+        const ctx = document.createElement('span');
+        ctx.textContent = (e.kind === 'longtask' ? 'long task · ' : '') + (e.paused ? '⏸ ' : '') + e.context;
+        row.title = `${formatLogTime(e.t)}  ${e.kind}  ${e.ms.toFixed(1)} ms`
+            + (e.drawCalls !== null ? `  ${e.drawCalls} draw calls` : '')
+            + (e.paused ? '  paused' : '')
+            + `\n${e.context}`;
+        row.append(t, ms, dc, ctx);
+        return row;
+    }
+
+    /** Threshold changed — re-evaluate the 2x highlight on existing rows. */
+    private recheckHotRows(): void {
+        const hot = this.frameLog.threshold * 2;
+        for (const el of Array.from(this.logList.children) as HTMLElement[]) {
+            if (!el.dataset.ms || el.classList.contains('sv-perflog-row--lt')) continue;
+            el.classList.toggle('sv-perflog-row--hot', parseFloat(el.dataset.ms) > hot);
+        }
     }
 
     private buildSection(title: string, fill: (grid: HTMLElement) => void): HTMLElement {
@@ -187,6 +414,10 @@ export class PerformancePanel {
     }
 
     private tick(): void {
+        // Raw, unclamped, speed-independent delta (deltaMS is capped at 100 ms and
+        // scaled by ticker.speed). One comparison unless the frame is slow.
+        this.frameLog.onFrame(this.viewport.ticker.elapsedMS);
+
         // Sample FPS every frame (cheap) so history is accurate…
         const fps = this.viewport.ticker.FPS;
         this.fpsHistory.push(fps);
@@ -200,6 +431,7 @@ export class PerformancePanel {
         if (this.renderAccum < 200) return;
         this.renderAccum = 0;
         this.render(fps);
+        this.renderFrameLog();
     }
 
     private render(fps: number): void {

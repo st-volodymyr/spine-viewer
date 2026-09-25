@@ -7,6 +7,7 @@ export interface DebugFlags {
     regions: boolean;
     clipping: boolean;
     paths: boolean;
+    origin: boolean;
 }
 
 const COLORS = {
@@ -17,6 +18,7 @@ const COLORS = {
     bounds: 0x4a7fff,
     clipping: 0xc04ad0,
     path: 0x12c2a0,
+    origin: 0xff2d95,
 };
 
 /**
@@ -31,7 +33,7 @@ const COLORS = {
  */
 export class SkeletonDebug {
     private g: Graphics;
-    private flags: DebugFlags = { bones: false, meshes: false, boundingBoxes: false, regions: false, clipping: false, paths: false };
+    private flags: DebugFlags = { bones: false, meshes: false, boundingBoxes: false, regions: false, clipping: false, paths: false, origin: false };
     private buf: number[] = [];
 
     constructor(private spine: any) {
@@ -46,7 +48,7 @@ export class SkeletonDebug {
 
     get anyOn(): boolean {
         const f = this.flags;
-        return f.bones || f.meshes || f.boundingBoxes || f.regions || f.clipping || f.paths;
+        return f.bones || f.meshes || f.boundingBoxes || f.regions || f.clipping || f.paths || f.origin;
     }
 
     destroy(): void {
@@ -86,6 +88,30 @@ export class SkeletonDebug {
         }
 
         if (f.bones) this.drawBones(skeleton);
+        if (f.origin) this.drawOrigin();
+    }
+
+    /**
+     * Axis lines through the skeleton origin (the point the game positions the
+     * spine by). Line width is compensated for zoom so it stays ~1px on screen.
+     */
+    private drawOrigin(): void {
+        const g = this.g;
+        const wt = g.worldTransform;
+        const s = Math.hypot(wt.a, wt.b) || 1;
+        const px = 1 / s;
+        const far = 100000;
+        g.lineStyle(px, COLORS.origin, 0.55);
+        g.moveTo(-far, 0);
+        g.lineTo(far, 0);
+        g.moveTo(0, -far);
+        g.lineTo(0, far);
+        g.lineStyle(1.5 * px, COLORS.origin, 1);
+        g.drawCircle(0, 0, 6 * px);
+        g.moveTo(-12 * px, 0);
+        g.lineTo(12 * px, 0);
+        g.moveTo(0, -12 * px);
+        g.lineTo(0, 12 * px);
     }
 
     private drawRegion(slot: any, att: any): void {

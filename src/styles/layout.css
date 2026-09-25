@@ -17,9 +17,48 @@ html, body, #app {
 .sv-app {
     display: grid;
     grid-template-rows: var(--sv-toolbar-height) minmax(0, 1fr) var(--sv-bottombar-height);
-    grid-template-columns: var(--sv-panel-width) minmax(0, 1fr) var(--sv-panel-width);
+    grid-template-columns: var(--sv-left-panel-width) minmax(0, 1fr) var(--sv-right-panel-width);
     width: 100%;
     height: 100%;
+    position: relative;
+}
+
+/* Drag handles on the inner edges of the side panels */
+.sv-panel-resizer {
+    position: absolute;
+    top: var(--sv-toolbar-height);
+    bottom: var(--sv-bottombar-height);
+    width: 7px;
+    z-index: 60;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.sv-panel-resizer--left { left: calc(var(--sv-left-panel-width) - 4px); }
+.sv-panel-resizer--right { right: calc(var(--sv-right-panel-width) - 4px); }
+
+.sv-panel-resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 1px;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+.sv-panel-resizer:hover::after,
+.sv-panel-resizer.sv-dragging::after {
+    left: 2px;
+    width: 3px;
+    background: var(--sv-accent);
+}
+
+body.sv-resizing-panels,
+body.sv-resizing-panels * {
+    cursor: col-resize !important;
+    user-select: none !important;
 }
 
 /* Viewport wrapper: canvas + tracks bar stacked vertically */
@@ -292,6 +331,38 @@ html, body, #app {
     display: flex;
     border-radius: 4px;
     overflow: hidden;
+}
+
+/* Event key ticks on the groove (single mode) */
+.sv-track-row-markers {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.sv-track-row-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 7px;
+    margin-left: -3px;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.sv-track-row-marker::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: #9a4ab5;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+
+.sv-track-row-marker:hover::after {
+    background: #c86ae6;
 }
 
 .sv-track-row-progress-fill--overlay {

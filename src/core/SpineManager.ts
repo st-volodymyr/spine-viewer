@@ -6,6 +6,7 @@ import type { SkeletonData as SkeletonData41 } from '@pixi-spine/all-4.1';
 import { eventBus } from './EventBus';
 import type { Viewport } from './Viewport';
 import { profileSkeleton, type ProfileResult } from '../services/AnimationProfiler';
+import { collectEventKeys, type EventKey, type EventKeyMap } from '../services/EventKeys';
 
 export interface DebugDrawOptions {
     bones: boolean;
@@ -14,6 +15,7 @@ export interface DebugDrawOptions {
     regions: boolean;
     clipping: boolean;
     paths: boolean;
+    origin: boolean;
 }
 
 export interface SpineEventData {
@@ -21,6 +23,8 @@ export interface SpineEventData {
     trackIndex: number;
     animationName: string;
     eventName?: string;
+    /** Key time of the fired custom event (seconds), for matching against EventKeys. */
+    eventTime?: number;
     time: number;
     projectName?: string;
 }
@@ -39,6 +43,7 @@ export class SpineManager {
     private listener: AnimationStateListener | null = null;
     private debug: SkeletonDebug | null = null;
     private profileCache: ProfileResult | null = null;
+    private eventKeysCache: EventKeyMap | null = null;
 
     constructor(viewport: Viewport) {
         this.viewport = viewport;
@@ -54,9 +59,20 @@ export class SpineManager {
         return this.profileCache;
     }
 
+    /** Static event keyframes of an animation, sorted by time (memoized per load). */
+    getEventKeys(animName: string): EventKey[] {
+        return this.getAllEventKeys().get(animName) ?? [];
+    }
+
+    getAllEventKeys(): EventKeyMap {
+        if (!this.eventKeysCache) this.eventKeysCache = collectEventKeys(this.spineData);
+        return this.eventKeysCache;
+    }
+
     createSpine(projectName: string): SpineElement {
         this.destroy();
         this.profileCache = null;
+        this.eventKeysCache = null;
         this.projectName = projectName;
         this.spine = new SpineElement(projectName);
         this.viewport.wrapper.addChild(this.spine);
@@ -67,6 +83,7 @@ export class SpineManager {
     createSpine41(skeletonData: SkeletonData41): Spine41 {
         this.destroy();
         this.profileCache = null;
+        this.eventKeysCache = null;
         this.projectName = '';
         const spine41 = new Spine41(skeletonData as any);
         this.spine = spine41;
@@ -92,7 +109,7 @@ export class SpineManager {
 
         this.listener = {
             start: (entry: TrackEntry) => {
-                eventBus.emit('spine:event', {
+                this.emitEvent({
                     type: 'start',
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
@@ -101,7 +118,7 @@ export class SpineManager {
                 } as SpineEventData);
             },
             complete: (entry: TrackEntry) => {
-                eventBus.emit('spine:event', {
+                this.emitEvent({
                     type: 'complete',
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
@@ -110,7 +127,7 @@ export class SpineManager {
                 } as SpineEventData);
             },
             end: (entry: TrackEntry) => {
-                eventBus.emit('spine:event', {
+                this.emitEvent({
                     type: 'end',
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
@@ -119,7 +136,7 @@ export class SpineManager {
                 } as SpineEventData);
             },
             interrupt: (entry: TrackEntry) => {
-                eventBus.emit('spine:event', {
+                this.emitEvent({
                     type: 'interrupt',
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
@@ -128,7 +145,7 @@ export class SpineManager {
                 } as SpineEventData);
             },
             dispose: (entry: TrackEntry) => {
-                eventBus.emit('spine:event', {
+                this.emitEvent({
                     type: 'dispose',
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
@@ -137,11 +154,12 @@ export class SpineManager {
                 } as SpineEventData);
             },
             event: (entry: TrackEntry, event: any) => {
-                eventBus.emit('spine:event', {
+                this.emitEvent({
                     type: 'event',
                     trackIndex: entry.trackIndex,
                     animationName: entry.animation?.name ?? '',
                     eventName: event.data?.name ?? '',
+                    eventTime: event.time,
                     time: entry.trackTime,
                     projectName: this.displayName || undefined,
                 } as SpineEventData);
@@ -149,6 +167,10 @@ export class SpineManager {
         };
 
         this.spine.state.addListener(this.listener as any);
+    }
+
+    private emitEvent(data: SpineEventData): void {
+        eventBus.emit('spine:event', data);
     }
 
     get spineData(): SkeletonData | SkeletonData41 | null {
@@ -362,7 +384,7 @@ export class SpineManager {
      */
     setDebugOptions(opts: DebugDrawOptions | null): void {
         if (!this.spine) return;
-        const anyOn = !!opts && (opts.bones || opts.meshes || opts.boundingBoxes || opts.regions || opts.clipping || opts.paths);
+        const anyOn = !!opts && (opts.bones || opts.meshes || opts.boundingBoxes || opts.regions || opts.clipping || opts.paths || opts.origin);
 
         if (!anyOn) {
             this.debug?.destroy();

@@ -38,6 +38,9 @@
     --sv-toolbar-height: 48px;
     --sv-bottombar-height: 26px;
     --sv-panel-width: 300px;
+    /* Live widths — overwritten by Layout's drag-resizers (persisted in localStorage) */
+    --sv-left-panel-width: var(--sv-panel-width);
+    --sv-right-panel-width: var(--sv-panel-width);
 
     --sv-checker-a: #ccc;
     --sv-checker-b: #ddd;

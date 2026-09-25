@@ -1,5 +1,9 @@
 import { eventBus } from '../../core/EventBus';
-import type { SpineEventData } from '../../core/SpineManager';
+import type { SpineEventData, SpineManager } from '../../core/SpineManager';
+import type { StateManager } from '../../core/StateManager';
+import type { EventKey } from '../../services/EventKeys';
+
+const KEY_FPS = 30;
 
 interface CompareProjectRef {
     name: string;
@@ -17,15 +21,39 @@ export class EventDebugPanel {
     private isCompareMode = false;
     private projectFilterEl!: HTMLElement;
 
-    constructor() {
+    // Event keys table
+    private keysBody!: HTMLElement;
+    private keysSummary!: HTMLElement;
+    private keysScope: 'playing' | 'all' = 'playing';
+    private keysSearch = '';
+    private playingSignature = '';
+    private scopeBtns = new Map<'playing' | 'all', HTMLButtonElement>();
+
+    constructor(
+        private spineManager: SpineManager,
+        private stateManager: StateManager,
+    ) {
         this.element = document.createElement('div');
         this.element.style.display = 'flex';
         this.element.style.flexDirection = 'column';
         this.element.style.padding = '8px 0';
+        this.buildKeysTable();
         this.build();
 
-        eventBus.on('spine:event', (data: SpineEventData) => this.onSpineEvent(data));
-        eventBus.on('project:change', () => { this.nameFilters.clear(); this.renderNameFilters(); });
+        eventBus.on('spine:event', (data: SpineEventData) => {
+            this.flashKey(data);
+            this.onSpineEvent(data);
+        });
+        eventBus.on('project:change', () => {
+            this.nameFilters.clear();
+            this.renderNameFilters();
+            this.renderKeys();
+        });
+        // "Playing" scope follows the active tracks; cheap poll, only while visible.
+        setInterval(() => {
+            if (this.keysScope !== 'playing' || !this.element.offsetParent) return;
+            if (this.playingAnimations().join('|') !== this.playingSignature) this.renderKeys();
+        }, 300);
         eventBus.on('mode:change', (mode: string) => {
             this.isCompareMode = mode === 'comparison';
             this.projectFilterEl.style.display = this.isCompareMode ? 'block' : 'none';
@@ -38,7 +66,196 @@ export class EventDebugPanel {
         });
     }
 
+    // ── Event keys table ─────────────────────────────────────────────
+
+    private buildKeysTable(): void {
+        const header = document.createElement('div');
+        header.className = 'sv-evkeys-header';
+        const title = document.createElement('span');
+        title.className = 'sv-evkeys-title';
+        title.textContent = 'EVENT KEYS';
+        header.appendChild(title);
+
+        const seg = document.createElement('div');
+        seg.className = 'sv-segmented';
+        (['playing', 'all'] as const).forEach(scope => {
+            const b = document.createElement('button');
+            b.textContent = scope === 'playing' ? 'Playing' : 'All';
+            b.title = scope === 'playing' ? 'Only animations on active tracks' : 'Every animation in the skeleton';
+            b.classList.toggle('active', scope === this.keysScope);
+            b.addEventListener('click', () => {
+                this.keysScope = scope;
+                this.scopeBtns.forEach((btn, k) => btn.classList.toggle('active', k === scope));
+                this.renderKeys();
+            });
+            this.scopeBtns.set(scope, b);
+            seg.appendChild(b);
+        });
+        header.appendChild(seg);
+        this.element.appendChild(header);
+
+        const search = document.createElement('input');
+        search.className = 'sv-tree-search sv-evkeys-search';
+        search.placeholder = 'Filter by event or animation...';
+        search.addEventListener('input', () => {
+            this.keysSearch = search.value.trim().toLowerCase();
+            this.renderKeys();
+        });
+        this.element.appendChild(search);
+
+        this.keysSummary = document.createElement('div');
+        this.keysSummary.className = 'sv-evkeys-summary';
+        this.element.appendChild(this.keysSummary);
+
+        this.keysBody = document.createElement('div');
+        this.keysBody.className = 'sv-evkeys';
+        this.element.appendChild(this.keysBody);
+
+        this.renderKeys();
+    }
+
+    private playingAnimations(): string[] {
+        return this.spineManager.getAllActiveTracks().map(t => t.name);
+    }
+
+    private renderKeys(): void {
+        const body = this.keysBody;
+        body.innerHTML = '';
+        this.playingSignature = this.playingAnimations().join('|');
+        const empty = (text: string) => {
+            const el = document.createElement('div');
+            el.className = 'sv-evkeys-empty';
+            el.textContent = text;
+            body.appendChild(el);
+        };
+
+        if (!this.spineManager.spine) {
+            this.keysSummary.textContent = '';
+            empty('Load a skeleton to see its event keys.');
+            return;
+        }
+
+        const all = this.spineManager.getAllEventKeys();
+        let totalKeys = 0;
+        let animsWithKeys = 0;
+        all.forEach(keys => {
+            totalKeys += keys.length;
+            if (keys.length) animsWithKeys++;
+        });
+        const types = this.spineManager.getEventNames().length;
+        this.keysSummary.textContent = `${types} event type${types === 1 ? '' : 's'} · ${totalKeys} key${totalKeys === 1 ? '' : 's'} in ${animsWithKeys} animation${animsWithKeys === 1 ? '' : 's'} · click a row to jump there`;
+
+        if (totalKeys === 0) {
+            empty('This skeleton has no event keys.');
+            return;
+        }
+
+        let names: string[];
+        if (this.keysScope === 'playing') {
+            names = [...new Set(this.playingAnimations())];
+            if (names.length === 0) {
+                empty('Nothing is playing — pick an animation, or switch to All.');
+                return;
+            }
+        } else {
+            names = [...all.keys()];
+        }
+
+        const q = this.keysSearch;
+        let shown = 0;
+        for (const anim of names) {
+            const keys = (all.get(anim) ?? []).filter(k =>
+                !q || k.name.toLowerCase().includes(q) || anim.toLowerCase().includes(q));
+            // In "Playing" scope still list event-less animations, so it's clear they were checked.
+            if (keys.length === 0 && (this.keysScope === 'all' || q)) continue;
+
+            const group = document.createElement('div');
+            group.className = 'sv-evkeys-group';
+            const gName = document.createElement('span');
+            gName.textContent = anim;
+            const gCount = document.createElement('span');
+            gCount.className = 'sv-evkeys-count';
+            gCount.textContent = keys.length ? String(keys.length) : 'no events';
+            group.append(gName, gCount);
+            body.appendChild(group);
+
+            for (const k of keys) {
+                body.appendChild(this.buildKeyRow(anim, k));
+                shown++;
+            }
+        }
+        if (shown === 0 && q) empty('No event keys match the filter.');
+    }
+
+    private buildKeyRow(anim: string, k: EventKey): HTMLElement {
+        const row = document.createElement('div');
+        row.className = 'sv-evkeys-row';
+        row.dataset.anim = anim;
+        row.dataset.name = k.name;
+        row.dataset.time = String(k.time);
+
+        const frameNo = Math.round(k.time * KEY_FPS);
+        const ms = document.createElement('span');
+        ms.className = 'sv-evkeys-time';
+        ms.textContent = String(Math.round(k.time * 1000));
+        ms.title = `${k.time.toFixed(3)} s · frame ${frameNo} @${KEY_FPS}fps`;
+
+        const frame = document.createElement('span');
+        frame.className = 'sv-evkeys-frame';
+        frame.textContent = `f${frameNo}`;
+
+        const name = document.createElement('span');
+        name.className = 'sv-evkeys-name';
+        name.textContent = k.name;
+
+        const vals: string[] = [];
+        if (k.int) vals.push(`i:${k.int}`);
+        if (k.float) vals.push(`f:${+k.float.toFixed(3)}`);
+        if (k.string) vals.push(`"${k.string}"`);
+        if (k.audio) vals.push(`♪ ${k.audio}`);
+        const val = document.createElement('span');
+        val.className = 'sv-evkeys-values';
+        val.textContent = vals.join(' ');
+        val.title = vals.join('  ');
+
+        row.append(ms, frame, name, val);
+        row.title = `Jump to ${k.name} in ${anim}`;
+        row.addEventListener('click', () => this.jumpTo(anim, k.time));
+        return row;
+    }
+
+    /** Seek (paused) to an event key: reuse a track already playing the animation, else start it. */
+    private jumpTo(anim: string, time: number): void {
+        let track = this.spineManager.getAllActiveTracks().find(t => t.name === anim)?.trackIndex;
+        if (track === undefined) {
+            track = this.stateManager.projectA?.currentTrack ?? 0;
+            this.spineManager.setAnimation(track, anim, false);
+        }
+        this.spineManager.seekToPaused(track, time);
+        this.stateManager.updateProjectA({ paused: true });
+        eventBus.emit('playback:paused-changed', true);
+    }
+
+    private flashKey(data: SpineEventData): void {
+        if (data.type !== 'event' || !this.element.offsetParent) return;
+        this.keysBody.querySelectorAll<HTMLElement>('.sv-evkeys-row').forEach(row => {
+            if (row.dataset.anim !== data.animationName || row.dataset.name !== data.eventName) return;
+            if (data.eventTime !== undefined && Math.abs(Number(row.dataset.time) - data.eventTime) > 0.001) return;
+            row.classList.remove('sv-evkeys-flash');
+            void row.offsetWidth; // restart the CSS animation
+            row.classList.add('sv-evkeys-flash');
+        });
+    }
+
+    // ── Canvas notifications ─────────────────────────────────────────
+
     private build(): void {
+        const notifHeader = document.createElement('div');
+        notifHeader.className = 'sv-evkeys-header';
+        notifHeader.style.marginTop = '14px';
+        notifHeader.innerHTML = '<span class="sv-evkeys-title">CANVAS NOTIFICATIONS</span>';
+        this.element.appendChild(notifHeader);
+
         const intro = document.createElement('div');
         intro.style.cssText = 'font-size:10px;color:var(--sv-text-muted);padding:0 0 8px;line-height:1.5';
         intro.innerHTML = 'Toggle event types to show them as on-canvas notifications.<br><strong>Note:</strong> <em>start</em> fires once per animation start — re-select an animation after enabling to test it. <em>complete</em> fires every loop cycle.';

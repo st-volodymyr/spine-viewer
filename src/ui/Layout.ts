@@ -120,6 +120,8 @@ export class Layout {
         this.buildToolbar();
         this.buildRightPanelTabs();
         this.buildBottomBar();
+        this.buildPanelResizer('left');
+        this.buildPanelResizer('right');
 
         // Update toolbar buttons when mode changes
         eventBus.on('mode:change', (mode: string) => {
@@ -257,6 +259,77 @@ export class Layout {
             this.compareBtn.textContent = 'Compare';
             this.addProjectBtn.style.display = 'none';
         }
+    }
+
+    /**
+     * Drag handle on the inner edge of a side panel. Width lives in the
+     * --sv-{side}-panel-width CSS var (grid column + handle position); the
+     * Viewport's ResizeObserver re-fits the canvas. Double-click resets.
+     */
+    private buildPanelResizer(side: 'left' | 'right'): void {
+        const cssVar = `--sv-${side}-panel-width`;
+        const storageKey = `sv-${side}-panel-width`;
+        const docStyle = document.documentElement.style;
+        const MIN_WIDTH = 220;
+        const MIN_VIEWPORT = 320;
+
+        const clamp = (w: number): number => {
+            const other = (side === 'left' ? this.rightPanel : this.leftPanel).getBoundingClientRect().width;
+            const max = Math.max(MIN_WIDTH, window.innerWidth - other - MIN_VIEWPORT);
+            return Math.round(Math.min(max, Math.max(MIN_WIDTH, w)));
+        };
+
+        const saved = Number(localStorage.getItem(storageKey));
+        if (saved > 0) docStyle.setProperty(cssVar, `${clamp(saved)}px`);
+
+        const handle = document.createElement('div');
+        handle.className = `sv-panel-resizer sv-panel-resizer--${side}`;
+        handle.title = 'Drag to resize, double-click to reset';
+        this.root.appendChild(handle);
+
+        const panel = side === 'left' ? this.leftPanel : this.rightPanel;
+        let startX = 0;
+        let startWidth = 0;
+
+        const onMove = (e: PointerEvent) => {
+            const dx = e.clientX - startX;
+            const width = clamp(startWidth + (side === 'left' ? dx : -dx));
+            docStyle.setProperty(cssVar, `${width}px`);
+        };
+        const onUp = (e: PointerEvent) => {
+            handle.releasePointerCapture(e.pointerId);
+            handle.classList.remove('sv-dragging');
+            document.body.classList.remove('sv-resizing-panels');
+            handle.removeEventListener('pointermove', onMove);
+            handle.removeEventListener('pointerup', onUp);
+            handle.removeEventListener('pointercancel', onUp);
+            localStorage.setItem(storageKey, String(Math.round(panel.getBoundingClientRect().width)));
+        };
+
+        handle.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            startX = e.clientX;
+            startWidth = panel.getBoundingClientRect().width;
+            handle.setPointerCapture(e.pointerId);
+            handle.classList.add('sv-dragging');
+            document.body.classList.add('sv-resizing-panels');
+            handle.addEventListener('pointermove', onMove);
+            handle.addEventListener('pointerup', onUp);
+            handle.addEventListener('pointercancel', onUp);
+        });
+
+        handle.addEventListener('dblclick', () => {
+            docStyle.removeProperty(cssVar);
+            localStorage.removeItem(storageKey);
+        });
+
+        // Keep the saved width valid when the window shrinks
+        window.addEventListener('resize', () => {
+            if (!docStyle.getPropertyValue(cssVar)) return;
+            const width = clamp(panel.getBoundingClientRect().width);
+            docStyle.setProperty(cssVar, `${width}px`);
+        });
     }
 
     private buildRightPanelTabs(): void {

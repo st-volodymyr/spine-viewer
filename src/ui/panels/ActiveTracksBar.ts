@@ -34,6 +34,7 @@ export class ActiveTracksBar {
                 eventBus.emit('playback:paused-changed', true);
             },
             getHeat: (name) => this.sampler.getHeat(name),
+            getEventMarkers: (name) => this.spineManager.getEventKeys(name),
         };
 
         this.bar = new TrackBar(mountPoint, controller);

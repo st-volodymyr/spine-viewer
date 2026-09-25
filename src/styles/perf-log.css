@@ -1,0 +1,119 @@
+/* Perf HUD — "Slow frames" log section (PerformancePanel + FrameLog). */
+
+.sv-perflog {
+    margin-top: 12px;
+}
+
+.sv-perflog-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 10px;
+    color: var(--sv-text-muted);
+    font-weight: 600;
+    letter-spacing: 0.4px;
+}
+
+.sv-perflog-caret {
+    display: inline-block;
+    width: 8px;
+    transition: transform 0.12s;
+}
+
+.sv-perflog--open .sv-perflog-caret {
+    transform: rotate(90deg);
+}
+
+.sv-perflog-badge {
+    font-family: var(--sv-font-mono);
+    font-weight: 600;
+    color: var(--sv-text-secondary);
+}
+
+.sv-perflog-badge--bad {
+    color: #c05050;
+}
+
+.sv-perflog-body {
+    display: none;
+    margin-top: 4px;
+}
+
+.sv-perflog--open .sv-perflog-body {
+    display: block;
+}
+
+.sv-perflog-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+
+.sv-perflog-controls select {
+    font-size: 10px;
+    padding: 1px 2px;
+    background: var(--sv-bg-input);
+    color: var(--sv-text-primary);
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+}
+
+.sv-perflog-stats {
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    color: var(--sv-text-secondary);
+    margin-bottom: 4px;
+}
+
+.sv-perflog-list {
+    max-height: 160px;
+    max-width: 420px;
+    overflow-y: auto;
+    background: var(--sv-bg-secondary);
+    border-radius: var(--sv-radius);
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    padding: 2px 0;
+}
+
+.sv-perflog-empty {
+    padding: 4px 6px;
+    color: var(--sv-text-muted);
+    font-family: var(--sv-font-family);
+}
+
+.sv-perflog-row {
+    display: grid;
+    grid-template-columns: 64px 44px 22px 1fr;
+    gap: 6px;
+    padding: 1px 6px;
+    white-space: nowrap;
+    color: var(--sv-text-primary);
+}
+
+.sv-perflog-row > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--sv-text-secondary);
+}
+
+.sv-perflog-row--lt .sv-perflog-ms {
+    color: #8a60c0;
+}
+
+.sv-perflog-row--hot {
+    background: rgba(192, 80, 80, 0.18);
+}
+
+.sv-perflog-row--hot .sv-perflog-ms {
+    color: #c05050;
+    font-weight: 700;
+}
+
+.sv-perflog-t {
+    color: var(--sv-text-muted);
+}

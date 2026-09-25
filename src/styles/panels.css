@@ -67,7 +67,7 @@
 .sv-toast-container {
     position: fixed;
     top: calc(var(--sv-toolbar-height) + 8px);
-    left: calc(var(--sv-panel-width) + 8px);
+    left: calc(var(--sv-left-panel-width) + 8px);
     z-index: 1000;
     display: flex;
     flex-direction: column;
@@ -386,4 +386,413 @@
 .sv-detail-value {
     color: var(--sv-text-primary);
     font-family: var(--sv-font-mono);
+}
+
+/* ── Segmented control (small pill group) ─────────────────────── */
+.sv-segmented {
+    display: inline-flex;
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.sv-segmented button {
+    border: 0;
+    background: var(--sv-bg-input);
+    color: var(--sv-text-secondary);
+    font: inherit;
+    font-size: 10px;
+    padding: 2px 8px;
+    cursor: pointer;
+}
+
+.sv-segmented button + button {
+    border-left: 1px solid var(--sv-border);
+}
+
+.sv-segmented button.active {
+    background: var(--sv-accent);
+    color: #fff;
+}
+
+/* ── Event keys table (Events tab) ────────────────────────────── */
+.sv-evkeys-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 0 6px;
+}
+
+.sv-evkeys-title {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    color: var(--sv-text-muted);
+}
+
+.sv-evkeys-search {
+    margin: 0 0 6px;
+}
+
+.sv-evkeys-summary {
+    font-size: 10px;
+    color: var(--sv-text-muted);
+    padding: 0 0 6px;
+}
+
+.sv-evkeys {
+    display: flex;
+    flex-direction: column;
+    max-height: 45vh;
+    overflow-y: auto;
+    border: 1px solid var(--sv-border-light);
+    border-radius: var(--sv-radius);
+}
+
+.sv-evkeys-empty {
+    padding: 10px;
+    font-size: 11px;
+    color: var(--sv-text-muted);
+    text-align: center;
+}
+
+.sv-evkeys-group {
+    position: sticky;
+    top: 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--sv-bg-secondary);
+    border-bottom: 1px solid var(--sv-border-light);
+    z-index: 1;
+}
+
+.sv-evkeys-count {
+    font-weight: 400;
+    color: var(--sv-text-muted);
+}
+
+.sv-evkeys-row {
+    display: grid;
+    grid-template-columns: 52px 34px minmax(60px, 1fr) minmax(0, 1.2fr);
+    gap: 6px;
+    align-items: center;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--sv-border-light);
+}
+
+.sv-evkeys-row:hover {
+    background: var(--sv-bg-hover);
+}
+
+.sv-evkeys-time {
+    font-family: var(--sv-font-mono);
+    text-align: right;
+}
+
+.sv-evkeys-time::after {
+    content: ' ms';
+    color: var(--sv-text-muted);
+    font-size: 9px;
+}
+
+.sv-evkeys-frame {
+    font-family: var(--sv-font-mono);
+    color: var(--sv-text-muted);
+    font-size: 10px;
+}
+
+.sv-evkeys-name {
+    color: #9a4ab5;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sv-evkeys-values {
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    color: var(--sv-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@keyframes sv-evkeys-flash {
+    from { background: rgba(154, 74, 181, 0.45); }
+    to { background: transparent; }
+}
+
+.sv-evkeys-flash {
+    animation: sv-evkeys-flash 0.9s ease-out;
+}
+
+/* ── Animation queue (left panel) ─────────────────────────────── */
+.sv-queue-add {
+    display: flex;
+    gap: 4px;
+}
+
+.sv-queue-add .sv-select {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+}
+
+.sv-queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 6px 0;
+}
+
+.sv-queue-empty {
+    font-size: 10px;
+    color: var(--sv-text-muted);
+    padding: 2px 0;
+}
+
+.sv-queue-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px 2px 2px;
+    font-size: var(--sv-font-size-sm);
+    border: 1px solid var(--sv-border-light);
+    border-left: 3px solid transparent;
+    border-radius: var(--sv-radius);
+    background: var(--sv-bg-input);
+    cursor: grab;
+}
+
+.sv-queue-item.played {
+    opacity: 0.45;
+}
+
+.sv-queue-item.current {
+    border-left-color: var(--sv-accent);
+    background: var(--sv-accent-light);
+}
+
+.sv-queue-item.dragging {
+    opacity: 0.4;
+}
+
+.sv-queue-item.drop-target {
+    box-shadow: 0 -2px 0 var(--sv-accent);
+}
+
+.sv-queue-grip {
+    color: var(--sv-text-muted);
+    font-size: 12px;
+    line-height: 1;
+}
+
+.sv-queue-num {
+    min-width: 14px;
+    color: var(--sv-text-muted);
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    text-align: right;
+}
+
+.sv-queue-item.current .sv-queue-num {
+    color: var(--sv-accent);
+}
+
+.sv-queue-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sv-queue-loop {
+    color: var(--sv-accent);
+    font-weight: 700;
+}
+
+.sv-queue-dur {
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    color: var(--sv-text-muted);
+}
+
+.sv-queue-rm {
+    border: 0;
+    background: transparent;
+    color: var(--sv-text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.sv-queue-rm:hover {
+    color: var(--sv-text-primary);
+}
+
+.sv-queue-repeat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: var(--sv-font-size-sm);
+    margin-bottom: 6px;
+}
+
+.sv-queue-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.sv-queue-meta {
+    flex: 1;
+    text-align: right;
+    font-size: 10px;
+    color: var(--sv-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Animation queue (left panel) ─────────────────────────────── */
+.sv-queue-add {
+    display: flex;
+    gap: 4px;
+}
+
+.sv-queue-add .sv-select {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+}
+
+.sv-queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 6px 0;
+}
+
+.sv-queue-empty {
+    font-size: 10px;
+    color: var(--sv-text-muted);
+    padding: 2px 0;
+}
+
+.sv-queue-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px 2px 2px;
+    font-size: var(--sv-font-size-sm);
+    border: 1px solid var(--sv-border-light);
+    border-left: 3px solid transparent;
+    border-radius: var(--sv-radius);
+    background: var(--sv-bg-input);
+    cursor: grab;
+}
+
+.sv-queue-item.played {
+    opacity: 0.45;
+}
+
+.sv-queue-item.current {
+    border-left-color: var(--sv-accent);
+    background: var(--sv-accent-light);
+}
+
+.sv-queue-item.dragging {
+    opacity: 0.4;
+}
+
+.sv-queue-item.drop-target {
+    box-shadow: 0 -2px 0 var(--sv-accent);
+}
+
+.sv-queue-grip {
+    color: var(--sv-text-muted);
+    font-size: 12px;
+    line-height: 1;
+}
+
+.sv-queue-num {
+    min-width: 14px;
+    color: var(--sv-text-muted);
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    text-align: right;
+}
+
+.sv-queue-item.current .sv-queue-num {
+    color: var(--sv-accent);
+}
+
+.sv-queue-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sv-queue-loop {
+    color: var(--sv-accent);
+    font-weight: 700;
+}
+
+.sv-queue-dur {
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    color: var(--sv-text-muted);
+}
+
+.sv-queue-rm {
+    border: 0;
+    background: transparent;
+    color: var(--sv-text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.sv-queue-rm:hover {
+    color: var(--sv-text-primary);
+}
+
+.sv-queue-repeat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: var(--sv-font-size-sm);
+    margin-bottom: 6px;
+}
+
+.sv-queue-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.sv-queue-meta {
+    flex: 1;
+    text-align: right;
+    font-size: 10px;
+    color: var(--sv-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

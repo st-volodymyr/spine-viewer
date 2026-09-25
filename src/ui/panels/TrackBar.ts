@@ -28,6 +28,8 @@ export interface TrackController {
     onPause?(): void;
     /** Normalized [0,1] heat per timeline bucket for an animation, or null. */
     getHeat?(animName: string): number[] | null;
+    /** Event keyframes of an animation (seconds) drawn as ticks on the groove. */
+    getEventMarkers?(animName: string): { time: number; name: string }[];
 }
 
 const HEAT_BUCKETS = 40;
@@ -40,6 +42,8 @@ interface TrackRowElements {
     loopBtn: HTMLElement;
     speedEl: HTMLElement;
     heatBars: HTMLElement[] | null;
+    markerLayer: HTMLElement | null;
+    markerAnim: string;
 }
 
 /**
@@ -130,6 +134,7 @@ export class TrackBar {
                 if (existing.animSelect.value !== t.name) existing.animSelect.value = t.name;
                 existing.speedEl.textContent = `${speed.toFixed(1)}x`;
                 this.updateHeat(existing, t.name);
+                if (existing.markerAnim !== t.name) this.renderMarkers(existing, t.trackIndex, t.name, t.duration);
             } else {
                 this.createRow(t, pct, animNames, speed);
             }
@@ -229,6 +234,13 @@ export class TrackBar {
         fill.style.width = `${pct}%`;
         progWrap.appendChild(fill);
 
+        let markerLayer: HTMLElement | null = null;
+        if (this.controller.getEventMarkers) {
+            markerLayer = document.createElement('div');
+            markerLayer.className = 'sv-track-row-markers';
+            progWrap.appendChild(markerLayer);
+        }
+
         if (this.canScrub) {
             progWrap.style.cursor = 'pointer';
             progWrap.title = 'Click or drag to scrub';
@@ -259,9 +271,33 @@ export class TrackBar {
         row.appendChild(stopBtn);
 
         this.inner.appendChild(row);
-        const elements: TrackRowElements = { row, animSelect, fill, timeEl, loopBtn, speedEl, heatBars };
+        const elements: TrackRowElements = { row, animSelect, fill, timeEl, loopBtn, speedEl, heatBars, markerLayer, markerAnim: '' };
         this.trackRows.set(t.trackIndex, elements);
         this.updateHeat(elements, t.name);
+        this.renderMarkers(elements, t.trackIndex, t.name, t.duration);
+    }
+
+    /** Event ticks on the groove; clicking one seeks exactly to the event key. */
+    private renderMarkers(row: TrackRowElements, trackIndex: number, animName: string, duration: number): void {
+        row.markerAnim = animName;
+        const layer = row.markerLayer;
+        if (!layer) return;
+        layer.innerHTML = '';
+        if (duration <= 0) return;
+        for (const m of this.controller.getEventMarkers?.(animName) ?? []) {
+            const tick = document.createElement('div');
+            tick.className = 'sv-track-row-marker';
+            tick.style.left = `${Math.min(100, (m.time / duration) * 100)}%`;
+            tick.title = `${m.name} @ ${Math.round(m.time * 1000)} ms`;
+            if (this.canScrub) {
+                tick.addEventListener('pointerdown', (e) => {
+                    e.stopPropagation();
+                    this.controller.onPause?.();
+                    this.controller.seekToPaused?.(trackIndex, m.time);
+                });
+            }
+            layer.appendChild(tick);
+        }
     }
 
     private step(trackIndex: number, dir: 1 | -1): void {

@@ -80,6 +80,10 @@ StateManager.setProjectA(project)       → EventBus 'project:change'
 - **`OnionSkin`** (`src/services/OnionSkin.ts`) — ghost poses before/after the current frame (clone spines via `cloneSpine`, set to offset trackTimes). Opt-in via the ONION SKIN panel section.
 - **`StressTest`** (`src/services/StressTest.ts`) — tiles N skeleton clones to find the FPS ceiling; driven by the STRESS TEST slider in the Perf HUD.
 - **Surfaces**: severity dots in `QuickAccessPanel`'s animation list, the **Profiler** right tab (`ProfilerPanel`) with per-mask clipping breakdown, the timeline heatmap in the single-mode tracks bar, and the live **Perf HUD** (`PerformancePanel`, DOM-throttled to ~5 Hz).
+- **`EventKeys`** (`src/services/EventKeys.ts`) — static event keyframes per animation (duck-typed EventTimelines), memoized via `SpineManager.getEventKeys/getAllEventKeys`. Drives the **Event Keys** table in the Events tab (Playing/All scope, filter, click-to-seek, flash on fire; `SpineEventData.eventTime` matches fired events to keys) and event ticks on the single-mode track groove (`TrackController.getEventMarkers`).
+- **`QueuePlayer`** (`src/services/QueuePlayer.ts`) — animation-queue sequencer with repeat modes `once` / `last` (loop last) / `all` (whole list re-queued when the last entry starts); per-entry listeners report the current index/cycle and detect when something else takes over the track. UI: ANIMATION QUEUE section (pick-to-add select, drag reorder, Play/Stop, played/current highlighting).
+- **`FrameLog`** (`src/services/FrameLog.ts`) — slow-frame (threshold 20/33/50 ms, with track/draw-call context) + `longtask` log shown in the Perf HUD "Slow frames" section (copy as TSV).
+- **Origin crosshair** — `origin` flag of `SkeletonDebug`/`DebugDrawOptions` (DEBUG DRAW → Origin); zoom-compensated axis lines through the skeleton origin.
 - **Reference image**: `Viewport.setReferenceImage` draws a world-space mockup behind the skeleton (VIEW section controls; routed via `reference:image`/`reference:opacity` events).
 
 ### UI panels
@@ -93,6 +97,7 @@ class XyzPanel {
 }
 ```
 - **Right tabs** (`App.buildPanels`): Inspect (SkeletonInspector), Atlas, Slots (PlaceholderPanel), Profiler (ProfilerPanel), Events (debug log), Compare
+- **Resizable side panels**: `Layout.buildPanelResizer` adds drag handles on the inner edges of the left/right panels. Widths live in `--sv-left-panel-width` / `--sv-right-panel-width` (set on `<html>`, persisted in `localStorage` as `sv-{side}-panel-width`, double-click resets); `Viewport`'s ResizeObserver re-fits the canvas.
 - **Left panel**: `QuickAccessPanel` in single mode; `ComparisonControlPanel` in compare mode (toggled by `mode:change`). QuickAccessPanel sections: animations (w/ severity dots), skins (single-select + Combine toggle), playback (loop off by default), queue, event triggers, VIEW (zoom slider mirroring wheel + Mix/crossfade + reference image), DEBUG DRAW, ONION SKIN.
 - **Tracks bar** (below the viewport): a shared **`TrackBar`** component (`src/ui/panels/TrackBar.ts`) driven by a `TrackController`. `ActiveTracksBar` (single mode) wires it to `SpineManager` and enables scrub/frame-step/heatmap; `CompareTracksBar` wires it to `ComparisonPanel` (no scrub/heatmap). Heatmap CSS lives under `.sv-track-row-progress--heat` in `layout.css`.
 - **`PlaceholderPanel`**: slot accessibility badges, copy-name buttons, and text/image overlays positioned by a single shared rAF follow-loop (one loop total, not one per marker).
@@ -101,7 +106,7 @@ class XyzPanel {
 - Note: `AnimationPanel.ts` was removed — `QuickAccessPanel` is the live animation/skin UI.
 
 ### Comparison mode
-`ComparisonEngine` computes diffs (animations/skins/slots/bones only in A or B) and has sync methods (`syncAnimation`, `syncSkin`, `syncSpeed`, `syncPause`). It also computes an attachment-level **`getReskinDiff`** (Reskin Overview) — per `slot / attachment`, which attachments are missing on either side and which resolve to a different atlas region or type — rendered as a collapsible section in the Compare tab with severity badges. The infrastructure supports `projectA` + `projectB` in state, though the UI surfaces this only in the Compare tab.
+`ComparisonEngine` computes diffs (animations/skins/slots/bones only in A or B) and has sync methods (`syncAnimation`, `syncSkin`, `syncSpeed`, `syncPause`). It also computes an attachment-level **`getReskinDiff`** (Reskin Overview) — per `slot / attachment`, which attachments are missing on either side and which resolve to a different atlas region or type — rendered as a collapsible section in the Compare tab with severity badges. Deeper diffs for shared content (`getDurationDiff`, `getEventTimingDiff`, `getConstraintDiff`, `getSlotSetupDiff`) render as further sections below it (styles in `src/styles/compare-diff.css`). The infrastructure supports `projectA` + `projectB` in state, though the UI surfaces this only in the Compare tab.
 
 ## Key conventions
 - CSS custom properties use `--sv-*` prefix (`src/styles/variables.css`)
