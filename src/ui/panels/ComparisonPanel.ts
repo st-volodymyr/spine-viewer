@@ -70,6 +70,12 @@ export class ComparisonPanel {
             }
         });
 
+        // Keep project labels a constant on-screen size as the view zooms (fit, wheel, slider).
+        eventBus.on('viewport:change', () => {
+            const zoom = this.viewport.wrapper.scale.x || 1;
+            this.labels.forEach(l => l.scale.set(1 / zoom));
+        });
+
         // Re-arrange on viewport resize
         const canvas = viewport.app.view as HTMLCanvasElement;
         const resizeObserver = new ResizeObserver(() => {

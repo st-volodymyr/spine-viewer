@@ -70,6 +70,9 @@ export class App {
             this.stateManager.setViewport({ zoom: 1 });
         });
 
+        // Fit-to-view (F key / canvas button / auto on load).
+        eventBus.on('viewport:fit', () => this.fitToView());
+
         // Zoom set from the VIEW slider (kept in sync with wheel zoom both ways).
         eventBus.on('viewport:zoom', (zoom: number) => {
             const z = Math.max(0.05, Math.min(10, zoom));
@@ -224,6 +227,12 @@ export class App {
                 case 'Numpad0': {
                     e.preventDefault();
                     eventBus.emit('viewport:reset');
+                    break;
+                }
+                case 'KeyF': {
+                    if (e.ctrlKey || e.metaKey) break;
+                    e.preventDefault();
+                    eventBus.emit('viewport:fit');
                     break;
                 }
                 case 'KeyL': {
@@ -422,6 +431,7 @@ export class App {
                 this.spineManager.setSkin(project.skinNames[0]);
             }
             this.spineManager.resetPose();
+            try { this.fitToView(); } catch (err) { console.warn('Fit to view failed:', err); }
 
             // Update version in bottom bar
             this.layout.updateVersion(
@@ -457,6 +467,27 @@ export class App {
         }
     }
 
+    /** Frame the skeleton (single) or every compare project (comparison). */
+    private fitToView(): void {
+        const managers = this.stateManager.mode === 'comparison'
+            ? this.comparisonPanel.getProjects().map(p => p.manager)
+            : [this.spineManager];
+        let rect: { x: number; y: number; width: number; height: number } | null = null;
+        for (const m of managers) {
+            const b = m.getFitBounds();
+            if (!b) continue;
+            if (!rect) { rect = b; continue; }
+            const x = Math.min(rect.x, b.x), y = Math.min(rect.y, b.y);
+            rect = {
+                x, y,
+                width: Math.max(rect.x + rect.width, b.x + b.width) - x,
+                height: Math.max(rect.y + rect.height, b.y + b.height) - y,
+            };
+        }
+        if (rect) this.viewport.fitRect(rect);
+        else eventBus.emit('viewport:reset');
+    }
+
     private setupHint: HTMLElement | null = null;
     private setupHintShown = false;
 
@@ -477,9 +508,7 @@ export class App {
             this.layout.viewport.appendChild(this.setupHint);
         }
         if (show) {
-            const bounds = this.spineManager.spine!.getLocalBounds();
-            const empty = !(bounds.width > 0 && bounds.height > 0);
-            this.setupHint.textContent = empty
+            this.setupHint.textContent = !this.spineManager.hasVisiblePose()
                 ? 'Setup pose is empty — pick an animation in the left panel'
                 : 'Setup pose — pick an animation in the left panel';
         }

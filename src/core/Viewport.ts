@@ -71,6 +71,20 @@ export class Viewport {
         });
     }
 
+    /** Zoom and pan so a wrapper-space rect fills the canvas (with a margin). */
+    fitRect(rect: { x: number; y: number; width: number; height: number }, margin = 0.1): void {
+        const { width, height } = this.app.screen;
+        if (!(rect.width > 0 && rect.height > 0) || width <= 0 || height <= 0) return;
+        const fill = 1 - margin * 2;
+        const zoom = Math.max(0.05, Math.min(10, Math.min(width * fill / rect.width, height * fill / rect.height)));
+        this.wrapper.scale.set(zoom, zoom);
+        this.wrapper.position.set(
+            width / 2 - (rect.x + rect.width / 2) * zoom,
+            height / 2 - (rect.y + rect.height / 2) * zoom,
+        );
+        this.stateManager.setViewport({ zoom, panX: this.wrapper.x, panY: this.wrapper.y });
+    }
+
     private setupInteraction(canvas: HTMLCanvasElement): void {
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();

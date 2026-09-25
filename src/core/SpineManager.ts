@@ -31,6 +31,41 @@ export interface SpineEventData {
 
 type AnySpine = SpineElement | Spine41;
 
+/**
+ * AABB of the region/mesh attachments that actually show in the current pose. Unlike
+ * `Skeleton.getBounds` it skips transparent slots (hidden pop-ups/glows parked at alpha 0)
+ * and duck-types attachments instead of using `instanceof` (see SkeletonDebug).
+ */
+function visibleSkeletonBounds(skeleton: any): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    if ((skeleton.color?.a ?? 1) <= 0.01) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const v: number[] = [];
+    for (const slot of (skeleton.drawOrder ?? skeleton.slots ?? []) as any[]) {
+        if (!slot?.bone?.active || (slot.color?.a ?? 1) <= 0.01) continue;
+        const att = slot.getAttachment?.() ?? slot.attachment;
+        if (!att || typeof att.computeWorldVertices !== 'function' || (att.color?.a ?? 1) <= 0.01) continue;
+        let n = 0;
+        try {
+            if (Array.isArray(att.triangles) && att.worldVerticesLength) {
+                n = att.worldVerticesLength; // mesh
+                att.computeWorldVertices(slot, 0, n, v, 0, 2);
+            } else if (att.worldVerticesLength === undefined) {
+                n = 8; // region quad
+                att.computeWorldVertices(slot, v, 0, 2);
+            }
+        } catch { continue; }
+        for (let i = 0; i < n; i += 2) {
+            const x = v[i], y = v[i + 1];
+            if (!isFinite(x) || !isFinite(y)) continue;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+    }
+    return isFinite(minX) && maxX > minX && maxY > minY ? { minX, minY, maxX, maxY } : null;
+}
+
 function isSpineElement(s: AnySpine): s is SpineElement {
     return s instanceof SpineElement;
 }
@@ -102,6 +137,63 @@ export class SpineManager {
         if (isSpineElement(this.spine)) return new SpineElement(this.projectName);
         const data = (this.spine as Spine41).spineData;
         return data ? new Spine41(data as any) : null;
+    }
+
+    /** True when the current pose draws at least one visible region/mesh. */
+    hasVisiblePose(): boolean {
+        return !!this.spine && visibleSkeletonBounds(this.spine.skeleton) !== null;
+    }
+
+    /**
+     * Bounds to frame the skeleton, in the spine's parent (viewport wrapper) space.
+     * While something plays: the current pose. In setup pose (often empty): the union of
+     * the setup pose and poses sampled across every animation, posed on a detached clone
+     * so the live state is untouched. Null when there is nothing visible to frame.
+     */
+    getFitBounds(): { x: number; y: number; width: number; height: number } | null {
+        const spine = this.spine as any;
+        if (!spine) return null;
+        const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+        const addSkeleton = (skeleton: any) => {
+            const b = visibleSkeletonBounds(skeleton);
+            if (!b) return;
+            box.minX = Math.min(box.minX, b.minX);
+            box.minY = Math.min(box.minY, b.minY);
+            box.maxX = Math.max(box.maxX, b.maxX);
+            box.maxY = Math.max(box.maxY, b.maxY);
+        };
+
+        addSkeleton(spine.skeleton);
+        const animations: any[] = (this.spineData as any)?.animations ?? [];
+        if (this.getAllActiveTracks().length === 0 && animations.length > 0) {
+            const clone = this.cloneSpine() as any;
+            if (clone) {
+                clone.skeleton.setSkin(spine.skeleton.skin);
+                clone.skeleton.setSlotsToSetupPose();
+                // Cap total pose evaluations so huge skeletons stay responsive.
+                const samples = Math.max(2, Math.min(6, Math.floor(240 / animations.length)));
+                for (const anim of animations) {
+                    const duration = anim.duration || 0;
+                    for (let i = 0; i < samples; i++) {
+                        clone.state.clearTracks();
+                        clone.skeleton.setToSetupPose();
+                        const entry = clone.state.setAnimation(0, anim.name, false);
+                        entry.mixDuration = 0;
+                        entry.trackTime = duration * i / (samples - 1);
+                        clone.update(0);
+                        addSkeleton(clone.skeleton);
+                    }
+                }
+                clone.destroy();
+            }
+        }
+        if (!isFinite(box.minX)) return null;
+
+        // Skeleton space → parent space (spine position, scale and flip).
+        const sx = spine.scale.x, sy = spine.scale.y;
+        const xs = [box.minX * sx, box.maxX * sx], ys = [box.minY * sy, box.maxY * sy];
+        const x = spine.x + Math.min(...xs), y = spine.y + Math.min(...ys);
+        return { x, y, width: Math.abs(xs[1] - xs[0]), height: Math.abs(ys[1] - ys[0]) };
     }
 
     private attachListeners(): void {

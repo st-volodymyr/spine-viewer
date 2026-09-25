@@ -41,6 +41,7 @@ No test runner or linter is configured; `tsc` (run by `npm run build`) is the co
   - `spine:event` — animation lifecycle events (start, complete, end, interrupt, dispose, event)
   - `atlas:loaded` — emitted after parse; AtlasInspector refreshes
   - `viewport:reset` — recenters and resets zoom
+  - `viewport:fit` — fit-to-view (`F`, canvas ⛶ button, auto on load); App `fitToView` frames `SpineManager.getFitBounds()` (union over compare projects in compare mode) via `Viewport.fitRect`
   - `mode:change` — single ↔ comparison; `comparison:projects-changed` — compare project list changed
   - `playback:paused-changed` — pause state changed elsewhere (Space / scrub / frame-step); panels sync their pause button
   - `pose:reset` — Reset Pose ran (button or `R`); panels drop the stale active-animation chip
@@ -70,6 +71,7 @@ StateManager.setProjectA(project)       → EventBus 'project:change'
 ### Spine rendering
 - **`Viewport`** stage hierarchy: `stage → gridGraphics (zIndex -1000) → wrapper (Container)`. SpineElement is added to `wrapper`.
 - Pan/zoom manipulates `wrapper` transform. Wheel zoom clamped to 0.05–10×.
+- **Fit bounds** (`SpineManager.getFitBounds`): current pose while something plays; in setup pose, the union of the setup pose and poses sampled across all animations on a detached clone. Uses `visibleSkeletonBounds` — duck-typed region/mesh AABB that skips alpha-0 slots (hidden pop-ups/glows), NOT `Skeleton.getBounds`.
 - `SpineManager` wraps SpineElement API: `setAnimation`, `addAnimation` (queuing), `setAnimationsList`, `setSkin`, `setSkins` (combine N skins into one — 4.2), `setSpeed`, `setPaused`, `setScale`, `setFlip`, `setDefaultMix` (crossfade duration), `resetPose` (clears all tracks, then setup pose — so it isn't immediately re-applied), `clearTrack`, `seekToPaused`/`stepFrame` (scrub & frame-step while paused), `cloneSpine` (detached copy for ghosts/stress-test), `setDebugOptions` (drives `SkeletonDebug`), and `profile()` (memoized static cost analysis).
 - **Track time**: looping tracks report `trackTime % duration`; finished one-shots clamp at `duration` (matching `AnimationState.getAnimationTime`) so progress bars freeze instead of cycling.
 
@@ -113,4 +115,4 @@ class XyzPanel {
 - Spine files are parsed manually — **do not** use pixi-ext's URL-based loaders
 - Track 0 is the primary animation track; up to 12 tracks (0–11) are supported simultaneously
 - **No auto-play on load** — a loaded skeleton stays in setup pose until the user picks an animation; nothing is pre-selected in the animation list and no track chip shows until something plays. A `.sv-setup-hint` pill (App `updateSetupHint`) sits at the bottom of the canvas while no track is active ("Setup pose is empty" when the setup-pose bounds are zero). **Loop is off by default** (one-shot).
-- Keyboard shortcuts: `Space` pause, `R` reset pose (clears tracks), `←`/`→` frame step, `L`/`Shift+L` loop current/all, `+/-` zoom, `0` reset view
+- Keyboard shortcuts: `Space` pause, `R` reset pose (clears tracks), `←`/`→` frame step, `L`/`Shift+L` loop current/all, `+/-` zoom, `0` reset view, `F` fit to view

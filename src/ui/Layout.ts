@@ -83,6 +83,14 @@ export class Layout {
         });
         viewportTools.appendChild(gridBtn);
 
+        // Fit to view
+        const fitBtn = document.createElement('button');
+        fitBtn.className = 'sv-btn sv-btn-sm sv-btn-icon';
+        fitBtn.textContent = '⛶';
+        fitBtn.title = 'Fit to view (F)';
+        fitBtn.addEventListener('click', () => eventBus.emit('viewport:fit'));
+        viewportTools.insertBefore(fitBtn, gridBtn);
+
         // BG color picker
         this.bgColorInput = document.createElement('input');
         this.bgColorInput.type = 'color';
