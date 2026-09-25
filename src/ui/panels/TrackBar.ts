@@ -28,6 +28,8 @@ export interface TrackController {
     onPause?(): void;
     /** Normalized [0,1] heat per timeline bucket for an animation, or null. */
     getHeat?(animName: string): number[] | null;
+    /** Metric/range caption shown next to the heat strip. */
+    getHeatLegend?(animName: string): { text: string; title: string } | null;
     /** Event keyframes of an animation (seconds) drawn as ticks on the groove. */
     getEventMarkers?(animName: string): { time: number; name: string }[];
 }
@@ -42,6 +44,7 @@ interface TrackRowElements {
     loopBtn: HTMLElement;
     speedEl: HTMLElement;
     heatBars: HTMLElement[] | null;
+    heatKey: HTMLElement | null;
     markerLayer: HTMLElement | null;
     markerAnim: string;
 }
@@ -97,9 +100,21 @@ export class TrackBar {
         this.emptyMsg.style.display = '';
     }
 
-    private fmtTime(time: number, duration: number, loop: boolean): string {
-        const ms = Math.round(time * 1000);
-        return loop ? `${ms} ms ∞` : `${ms} / ${Math.round(duration * 1000)} ms`;
+    /** Seconds, same format as the status bar and animation list. */
+    private fmtTime(time: number, duration: number): string {
+        return `${time.toFixed(2)} / ${duration.toFixed(2)} s`;
+    }
+
+    /** Speed is global; only worth a badge when it isn't the default 1×. */
+    private applySpeed(el: HTMLElement, speed: number): void {
+        el.textContent = `×${+speed.toFixed(2)}`;
+        el.style.display = Math.abs(speed - 1) < 1e-3 ? 'none' : '';
+    }
+
+    private applyLoop(btn: HTMLElement, loop: boolean): void {
+        btn.textContent = loop ? 'Loop' : 'Once';
+        btn.classList.toggle('sv-track-row-btn--on', loop);
+        btn.title = loop ? 'Looping (click: play once)' : 'Plays once (click: loop)';
     }
 
     private update(): void {
@@ -128,11 +143,10 @@ export class TrackBar {
             if (existing) {
                 if (this.seekingTrack === t.trackIndex) continue; // pointer is authoritative
                 existing.fill.style.width = `${pct}%`;
-                existing.timeEl.textContent = this.fmtTime(t.time, t.duration, t.loop);
-                existing.loopBtn.textContent = t.loop ? '∞' : '1×';
-                existing.loopBtn.title = t.loop ? 'Looping (click: play once)' : 'Play once (click: loop)';
+                existing.timeEl.textContent = this.fmtTime(t.time, t.duration);
+                this.applyLoop(existing.loopBtn, t.loop);
                 if (existing.animSelect.value !== t.name) existing.animSelect.value = t.name;
-                existing.speedEl.textContent = `${speed.toFixed(1)}x`;
+                this.applySpeed(existing.speedEl, speed);
                 this.updateHeat(existing, t.name);
                 if (existing.markerAnim !== t.name) this.renderMarkers(existing, t.trackIndex, t.name, t.duration);
             } else {
@@ -143,6 +157,11 @@ export class TrackBar {
 
     private updateHeat(row: TrackRowElements, animName: string): void {
         if (!row.heatBars) return;
+        if (row.heatKey) {
+            const legend = this.controller.getHeatLegend?.(animName) ?? null;
+            row.heatKey.textContent = legend?.text ?? 'heat —';
+            row.heatKey.title = legend?.title ?? 'Heatmap fills in as the animation plays (cost per timeline position).';
+        }
         const heat = this.controller.getHeat?.(animName) ?? null;
         for (let i = 0; i < row.heatBars.length; i++) {
             const bar = row.heatBars[i];
@@ -182,9 +201,8 @@ export class TrackBar {
         row.appendChild(animSelect);
 
         const loopBtn = document.createElement('button');
-        loopBtn.className = 'sv-track-row-btn';
-        loopBtn.textContent = t.loop ? '∞' : '1×';
-        loopBtn.title = t.loop ? 'Looping (click: play once)' : 'Play once (click: loop)';
+        loopBtn.className = 'sv-track-row-btn sv-track-row-loop';
+        this.applyLoop(loopBtn, t.loop);
         loopBtn.addEventListener('click', () => {
             const cur = this.controller.getTrackInfo?.(t.trackIndex);
             const next = !(cur?.loop ?? t.loop);
@@ -195,14 +213,14 @@ export class TrackBar {
         if (this.canStep) {
             const back = document.createElement('button');
             back.className = 'sv-track-row-btn';
-            back.textContent = '◀';
+            back.textContent = '−1f';
             back.title = 'Step back 1 frame (keyboard: ←)';
             back.addEventListener('click', () => this.step(t.trackIndex, -1));
             row.appendChild(back);
 
             const fwd = document.createElement('button');
             fwd.className = 'sv-track-row-btn';
-            fwd.textContent = '▶';
+            fwd.textContent = '+1f';
             fwd.title = 'Step forward 1 frame (keyboard: →)';
             fwd.addEventListener('click', () => this.step(t.trackIndex, 1));
             row.appendChild(fwd);
@@ -248,14 +266,22 @@ export class TrackBar {
         }
         row.appendChild(progWrap);
 
+        let heatKey: HTMLElement | null = null;
+        if (this.hasHeat) {
+            heatKey = document.createElement('span');
+            heatKey.className = 'sv-track-row-heatkey';
+            row.appendChild(heatKey);
+        }
+
         const timeEl = document.createElement('span');
         timeEl.className = 'sv-track-row-time';
-        timeEl.textContent = this.fmtTime(t.time, t.duration, t.loop);
+        timeEl.textContent = this.fmtTime(t.time, t.duration);
         row.appendChild(timeEl);
 
         const speedEl = document.createElement('span');
         speedEl.className = 'sv-track-row-speed';
-        speedEl.textContent = `${speed.toFixed(1)}x`;
+        speedEl.title = 'Playback speed';
+        this.applySpeed(speedEl, speed);
         row.appendChild(speedEl);
 
         const stopBtn = document.createElement('button');
@@ -271,7 +297,7 @@ export class TrackBar {
         row.appendChild(stopBtn);
 
         this.inner.appendChild(row);
-        const elements: TrackRowElements = { row, animSelect, fill, timeEl, loopBtn, speedEl, heatBars, markerLayer, markerAnim: '' };
+        const elements: TrackRowElements = { row, animSelect, fill, timeEl, loopBtn, speedEl, heatBars, heatKey, markerLayer, markerAnim: '' };
         this.trackRows.set(t.trackIndex, elements);
         this.updateHeat(elements, t.name);
         this.renderMarkers(elements, t.trackIndex, t.name, t.duration);
@@ -317,7 +343,7 @@ export class TrackBar {
             this.controller.seekToPaused?.(trackIndex, time);
             fill.style.width = `${frac * 100}%`;
             const row = this.trackRows.get(trackIndex);
-            if (row) row.timeEl.textContent = this.fmtTime(time, duration, info?.loop ?? false);
+            if (row) row.timeEl.textContent = this.fmtTime(time, duration);
         };
 
         const onMove = (e: PointerEvent) => seekToClientX(e.clientX);

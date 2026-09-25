@@ -9,6 +9,9 @@ interface CompareProjectRef {
     name: string;
 }
 
+/** Event toasts kept on the canvas at once (oldest dropped first). */
+const MAX_CANVAS_TOASTS = 4;
+
 export class EventDebugPanel {
     element: HTMLElement;
     private typeFilters: Map<string, boolean> = new Map();
@@ -437,22 +440,23 @@ export class EventDebugPanel {
 
         if (!this.toastContainer) {
             this.toastContainer = document.createElement('div');
-            this.toastContainer.style.cssText = 'position:absolute;bottom:8px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none';
+            this.toastContainer.className = 'sv-canvas-toasts';
             viewport.appendChild(this.toastContainer);
         }
 
         const toast = document.createElement('div');
-        toast.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 12px;border-radius:12px;background:${bg};color:#fff;font-size:12px;font-family:monospace;white-space:nowrap`;
+        toast.className = 'sv-canvas-toast';
+        toast.style.background = bg;
 
         if (projectBadge) {
             const pb = document.createElement('span');
-            pb.style.cssText = 'font-size:10px;opacity:0.8;max-width:80px;overflow:hidden;text-overflow:ellipsis;border-right:1px solid rgba(255,255,255,0.4);padding-right:6px';
+            pb.className = 'sv-canvas-toast-project';
             pb.textContent = projectBadge;
             toast.appendChild(pb);
         }
         if (badge) {
             const b = document.createElement('span');
-            b.style.cssText = 'font-size:10px;opacity:0.7';
+            b.className = 'sv-canvas-toast-badge';
             b.textContent = badge;
             toast.appendChild(b);
         }
@@ -461,6 +465,10 @@ export class EventDebugPanel {
         toast.appendChild(t);
 
         this.toastContainer.appendChild(toast);
+        // Cap the stack so a burst of events never climbs over the art.
+        while (this.toastContainer.childElementCount > MAX_CANVAS_TOASTS) {
+            this.toastContainer.firstElementChild?.remove();
+        }
         setTimeout(() => {
             toast.style.transition = 'opacity 0.3s';
             toast.style.opacity = '0';

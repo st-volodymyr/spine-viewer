@@ -272,7 +272,7 @@ body.sv-resizing-panels * {
 .sv-track-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 8px 14px;
     border-bottom: 1px solid var(--sv-border-light);
     font-size: var(--sv-font-size);
@@ -293,9 +293,9 @@ body.sv-resizing-panels * {
 }
 
 .sv-track-row-select {
-    flex: 1;
-    min-width: 80px;
-    max-width: 200px;
+    /* Shrinks before the groove does, so the timeline stays usable on narrow canvases. */
+    flex: 0 1 180px;
+    min-width: 70px;
 }
 
 .sv-track-row-btn {
@@ -319,6 +319,16 @@ body.sv-resizing-panels * {
     color: var(--sv-text-primary);
 }
 
+.sv-track-row-loop {
+    min-width: 48px;
+    font-size: var(--sv-font-size-sm);
+}
+
+.sv-track-row-btn--on {
+    color: var(--sv-accent);
+    border-color: var(--sv-accent);
+}
+
 .sv-track-row-stop:hover {
     background: var(--sv-error);
     color: var(--sv-accent-text);
@@ -326,8 +336,8 @@ body.sv-resizing-panels * {
 }
 
 .sv-track-row-progress {
-    flex: 1;
-    min-width: 140px;
+    flex: 1 0 160px;
+    min-width: 160px;
     height: 10px;
     background: var(--sv-border);
     border-radius: 5px;
@@ -416,11 +426,23 @@ body.sv-resizing-panels * {
 
 .sv-track-row-time {
     font-family: var(--sv-font-mono);
-    font-size: var(--sv-font-size);
+    font-size: var(--sv-font-size-sm);
     color: var(--sv-text-secondary);
-    min-width: 110px;
+    min-width: 84px;
     text-align: right;
     flex-shrink: 0;
+}
+
+.sv-track-row-heatkey {
+    /* Green→red swatch + metric range: the legend for the heat groove. */
+    font-family: var(--sv-font-mono);
+    font-size: 10px;
+    color: var(--sv-text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: help;
+    padding-left: 16px;
+    background: linear-gradient(90deg, hsl(120, 70%, 45%), hsl(60, 70%, 45%), hsl(0, 70%, 45%)) left center / 12px 6px no-repeat;
 }
 
 .sv-track-row-speed {

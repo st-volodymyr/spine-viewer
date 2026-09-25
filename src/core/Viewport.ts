@@ -1,10 +1,13 @@
 import { Application, Container, Graphics, Sprite, Texture } from '@electricelephants/pixi-ext';
 import { eventBus } from './EventBus';
 import type { StateManager } from './StateManager';
+import { DrawCallCounter } from '../services/DrawCallCounter';
 
 export class Viewport {
     app: Application;
     wrapper: Container;
+    /** Draw calls of the last rendered frame (all of the stage, not just the skeleton). */
+    readonly drawCalls: DrawCallCounter;
     private gridGraphics: Graphics;
     private stateManager: StateManager;
     private isPanning = false;
@@ -26,6 +29,7 @@ export class Viewport {
         });
 
         (globalThis as any).__PIXI_APP__ = this.app;
+        this.drawCalls = new DrawCallCounter(this.app.renderer);
 
         this.wrapper = new Container();
         this.wrapper.sortableChildren = true;

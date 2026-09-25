@@ -759,7 +759,7 @@ export class QuickAccessPanel {
             const isActive = activeTracks.has(i);
             if (isSelected) {
                 pill.style.background = 'var(--sv-accent)';
-                pill.style.color = '#fff';
+                pill.style.color = 'var(--sv-accent-text)';
                 pill.style.borderColor = 'var(--sv-accent)';
             } else if (isActive) {
                 pill.style.background = 'rgba(99,102,241,0.15)';
@@ -997,7 +997,7 @@ export class QuickAccessPanel {
         row.style.gap = '8px';
         row.style.cursor = 'pointer';
         row.style.background = isActive ? 'var(--sv-accent)' : 'transparent';
-        row.style.color = isActive ? '#fff' : 'var(--sv-text-primary)';
+        row.style.color = isActive ? 'var(--sv-accent-text)' : 'var(--sv-text-primary)';
         row.style.fontSize = 'var(--sv-font-size)';
 
         // Cost severity pip (animations only) — immediate "which ones are heavy".
@@ -1014,7 +1014,7 @@ export class QuickAccessPanel {
         }
 
         const dot = document.createElement('span');
-        dot.style.cssText = `width:7px;height:7px;border-radius:50%;flex-shrink:0;border:1px solid ${isActive ? 'rgba(255,255,255,0.7)' : 'var(--sv-text-muted)'};background:${isActive ? 'rgba(255,255,255,0.9)' : 'transparent'}`;
+        dot.style.cssText = `width:7px;height:7px;border-radius:50%;flex-shrink:0;border:1px solid ${isActive ? 'var(--sv-accent-text)' : 'var(--sv-text-muted)'};background:${isActive ? 'var(--sv-accent-text)' : 'transparent'}`;
         row.appendChild(dot);
 
         const nameEl = document.createElement('span');
@@ -1029,7 +1029,7 @@ export class QuickAccessPanel {
         const copyBtn = document.createElement('button');
         copyBtn.className = 'sv-btn sv-btn-sm';
         copyBtn.style.cssText = 'padding:0 5px;min-width:22px;opacity:0;font-size:var(--sv-font-size-sm);flex-shrink:0';
-        if (isActive) { copyBtn.style.background = 'rgba(255,255,255,0.2)'; copyBtn.style.border = '1px solid rgba(255,255,255,0.3)'; copyBtn.style.color = '#fff'; }
+        if (isActive) { copyBtn.style.background = 'transparent'; copyBtn.style.border = '1px solid var(--sv-accent-text)'; copyBtn.style.color = 'var(--sv-accent-text)'; }
         copyBtn.textContent = '\u2398';
         copyBtn.title = 'Copy name';
         copyBtn.addEventListener('click', (e) => {
@@ -1107,7 +1107,7 @@ export class QuickAccessPanel {
             this.animTag.style.display = 'block';
             this.animTag.innerHTML = '';
             const chip = document.createElement('span');
-            chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:10px;background:var(--sv-accent);color:#fff;font-size:var(--sv-font-size-sm)';
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:10px;background:var(--sv-accent);color:var(--sv-accent-text);font-size:var(--sv-font-size-sm)';
             const trackBadge = document.createElement('strong');
             trackBadge.textContent = `T${this.currentTrack}`;
             chip.appendChild(trackBadge);

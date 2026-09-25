@@ -295,9 +295,7 @@ export class PerformancePanel {
     /** Only called for slow frames / long tasks — allocation is fine here. */
     private frameContext(): FrameContext {
         // Counter reflects the last completed render (the ticker runs before render).
-        const renderer = this.viewport.app.renderer as any;
-        const dc = renderer._drawCallCount ?? renderer.batch?._drawCallCount;
-        const drawCalls = typeof dc === 'number' ? dc : null;
+        const drawCalls = this.viewport.drawCalls.last;
 
         if (this.isCompareMode && this.comparisonPanel) {
             const projects = this.comparisonPanel.getProjects();
@@ -448,9 +446,7 @@ export class PerformancePanel {
         this.maxEl.textContent = Math.round(max) + ' fps';
         this.frameEl.textContent = frameMs.toFixed(2) + ' ms';
 
-        // Draw calls estimate from PixiJS renderer
-        const renderer = (this.viewport.app.renderer as any);
-        const drawCalls = renderer._drawCallCount ?? renderer.batch?._drawCallCount ?? null;
+        const drawCalls = this.viewport.drawCalls.last;
         this.drawCallsEl.textContent = drawCalls !== null ? String(drawCalls) : '\u2014';
 
         // Skeleton info
@@ -519,6 +515,7 @@ export class PerformancePanel {
         }
 
         // VRAM estimate from PixiJS managed textures
+        const renderer = this.viewport.app.renderer as any;
         let vramBytes = 0;
         try {
             const managedTextures: any[] = renderer.texture?.managedTextures ?? renderer._managedTextures ?? [];

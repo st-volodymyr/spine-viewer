@@ -1,5 +1,5 @@
 import { eventBus } from '../core/EventBus';
-import type { StateManager } from '../core/StateManager';
+import { CANVAS_BG, savedTheme, type StateManager } from '../core/StateManager';
 
 export class Layout {
     root: HTMLElement;
@@ -42,8 +42,7 @@ export class Layout {
         this.root.className = 'sv-app';
 
         // Apply saved theme (light is default)
-        const savedTheme = localStorage.getItem('sv-theme') || 'light';
-        document.documentElement.setAttribute('data-theme', savedTheme);
+        document.documentElement.setAttribute('data-theme', savedTheme());
 
         // Toolbar
         this.toolbar = document.createElement('div');
@@ -244,11 +243,16 @@ export class Layout {
     }
 
     private toggleTheme(): void {
-        const current = document.documentElement.getAttribute('data-theme') || 'light';
+        const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
         const next = current === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
         localStorage.setItem('sv-theme', next);
         this.updateThemeButton();
+        // Canvas follows the theme unless the user picked their own colour.
+        if (this.stateManager.viewport.bgColor.toLowerCase() === CANVAS_BG[current]) {
+            this.stateManager.setViewport({ bgColor: CANVAS_BG[next] });
+            this.bgColorInput.value = CANVAS_BG[next];
+        }
     }
 
     private updateThemeButton(): void {

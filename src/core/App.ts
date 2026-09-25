@@ -557,15 +557,13 @@ export class App {
         if (this.stateManager.mode === 'comparison') return;
         if (this.stateManager.projectA?.paused) return;
 
-        const renderer = this.viewport.app.renderer as any;
-        const drawCalls = renderer._drawCallCount ?? renderer.batch?._drawCallCount;
-        const cost = (typeof drawCalls === 'number' && drawCalls > 0)
-            ? drawCalls
-            : this.viewport.ticker.deltaMS;
+        const drawCalls = this.viewport.drawCalls.last;
+        const useDrawCalls = drawCalls !== null && drawCalls > 0;
+        const cost = useDrawCalls ? drawCalls : this.viewport.ticker.deltaMS;
 
         for (const t of this.spineManager.getAllActiveTracks()) {
             if (t.duration <= 0) continue;
-            this.perfSampler.sample(t.name, t.time / t.duration, cost);
+            this.perfSampler.sample(t.name, t.time / t.duration, cost, useDrawCalls ? 'drawCalls' : 'frameMs');
         }
     }
 

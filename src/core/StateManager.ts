@@ -1,6 +1,17 @@
 import { eventBus } from './EventBus';
 import type { AppState, SpineProjectState, ViewportState } from '../types/state';
 
+/** Default canvas colour per UI theme; the canvas follows the theme until the user picks a colour. */
+export const CANVAS_BG = { light: '#c8c8c8', dark: '#2b2b2b' } as const;
+
+export function savedTheme(): 'light' | 'dark' {
+    try {
+        return localStorage.getItem('sv-theme') === 'dark' ? 'dark' : 'light';
+    } catch {
+        return 'light';
+    }
+}
+
 export class StateManager {
     private state: AppState = {
         projectA: null,
@@ -9,7 +20,7 @@ export class StateManager {
             zoom: 1,
             panX: 0,
             panY: 0,
-            bgColor: '#c8c8c8',
+            bgColor: CANVAS_BG[savedTheme()],
             showGrid: true,
         },
         mode: 'single',
